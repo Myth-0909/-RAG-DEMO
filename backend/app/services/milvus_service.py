@@ -106,6 +106,7 @@ class MilvusService:
         if not utility.has_collection(collection_name):
             return
         collection = Collection(collection_name)
+        collection.load()
         collection.delete(f"document_id == {document_id}")
         collection.flush()
 
