@@ -7,16 +7,12 @@ class KnowledgeBaseCreate(BaseModel):
     name: str
     description: Optional[str] = None
     domain_id: Optional[int] = None
-    embedding_model: Optional[str] = None
-    chunk_strategy: str = "recursive"
 
 
 class KnowledgeBaseUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     domain_id: Optional[int] = None
-    embedding_model: Optional[str] = None
-    chunk_strategy: Optional[str] = None
     is_active: Optional[bool] = None
 
 
@@ -25,8 +21,6 @@ class KnowledgeBaseResponse(BaseModel):
     name: str
     description: Optional[str] = None
     domain_id: Optional[int] = None
-    embedding_model: Optional[str] = None
-    chunk_strategy: str
     is_active: bool
     document_count: Optional[int] = 0
     created_at: Optional[datetime] = None

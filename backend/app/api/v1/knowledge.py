@@ -122,7 +122,6 @@ async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     metadata_json: Optional[str] = Form(None),
-    chunk_strategy: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
@@ -141,7 +140,6 @@ async def upload_document(
         f.write(content)
 
     metadata = json.loads(metadata_json) if metadata_json else None
-    strategy = chunk_strategy or kb.chunk_strategy
 
     doc = Document(
         knowledge_base_id=kb_id,
@@ -156,7 +154,7 @@ async def upload_document(
     db.commit()
     db.refresh(doc)
 
-    background_tasks.add_task(process_document, doc.id, file_path, strategy, metadata)
+    background_tasks.add_task(process_document, doc.id, file_path, metadata)
 
     return doc
 

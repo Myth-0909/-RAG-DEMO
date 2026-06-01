@@ -6,7 +6,7 @@ import {
 import {
   PlusOutlined, UploadOutlined, DeleteOutlined, FileTextOutlined,
   EyeOutlined, ReloadOutlined, DatabaseOutlined, FileOutlined,
-  AppstoreOutlined,
+  AppstoreOutlined, ThunderboltOutlined,
 } from '@ant-design/icons';
 import {
   getKnowledgeBases, createKnowledgeBase, deleteKnowledgeBase,
@@ -15,12 +15,13 @@ import {
 
 const { TextArea } = Input;
 
-const chunkStrategies = [
-  { label: '递归字符', value: 'recursive' },
-  { label: '固定大小', value: 'fixed' },
-  { label: '父子分块', value: 'parent_child' },
-  { label: '语义分块', value: 'semantic' },
-];
+const strategyLabels: Record<string, { label: string; color: string }> = {
+  recursive: { label: '递归分块', color: '#5b8ec9' },
+  fixed: { label: '固定分块', color: '#8a8580' },
+  parent_child: { label: '父子分块', color: '#e8653a' },
+  semantic: { label: '语义分块', color: '#4a9e6e' },
+  hybrid: { label: '混合分块', color: '#9b59b6' },
+};
 
 const statusConfig: Record<string, { color: string; text: string }> = {
   pending: { color: 'default', text: '等待中' },
@@ -99,7 +100,7 @@ const KnowledgePage: React.FC = () => {
     formData.append('metadata_json', JSON.stringify({ author: 'admin' }));
     try {
       await uploadDocument(selectedKb.id, formData);
-      message.success('已上传，后台处理中');
+      message.success('已上传，系统自动分析内容并分块');
       refreshDocs();
     } catch {
       message.error('上传失败');
@@ -126,6 +127,14 @@ const KnowledgePage: React.FC = () => {
     setChunks(res.data);
   };
 
+  const getDocStrategy = (doc: any): string | null => {
+    return doc.metadata_json?.strategy?.selected || null;
+  };
+
+  const getDocAnalysis = (doc: any) => {
+    return doc.metadata_json?.strategy || null;
+  };
+
   // Stats
   const totalDocs = kbs.reduce((s, kb) => s + (kb.document_count || 0), 0);
   const activeKbs = kbs.filter(kb => kb.is_active).length;
@@ -146,14 +155,6 @@ const KnowledgePage: React.FC = () => {
     },
     { title: '描述', dataIndex: 'description', key: 'description', ellipsis: true,
       render: (v: string) => <span style={{ color: '#8a8580' }}>{v || '—'}</span>,
-    },
-    {
-      title: '分块策略', dataIndex: 'chunk_strategy', key: 'chunk_strategy',
-      width: 120,
-      render: (v: string) => {
-        const label = chunkStrategies.find(s => s.value === v)?.label || v;
-        return <Tag style={{ background: '#f4f3f1', color: '#6b6560' }}>{label}</Tag>;
-      },
     },
     {
       title: '文档',
@@ -207,7 +208,7 @@ const KnowledgePage: React.FC = () => {
       render: (v: string) => <span style={{ fontWeight: 500 }}>{v}</span>,
     },
     {
-      title: '类型', dataIndex: 'file_type', key: 'type', width: 70,
+      title: '类型', dataIndex: 'file_type', key: 'type', width: 60,
       render: (v: string) => (
         <span style={{
           fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
@@ -216,7 +217,7 @@ const KnowledgePage: React.FC = () => {
       ),
     },
     {
-      title: '大小', dataIndex: 'file_size', key: 'size', width: 90,
+      title: '大小', dataIndex: 'file_size', key: 'size', width: 80,
       render: (v: number) => (
         <span style={{ fontVariantNumeric: 'tabular-nums', color: '#6b6560', fontSize: 13 }}>
           {v ? `${(v / 1024).toFixed(1)} KB` : '—'}
@@ -224,14 +225,27 @@ const KnowledgePage: React.FC = () => {
       ),
     },
     {
-      title: '状态', dataIndex: 'status', key: 'status', width: 100,
+      title: '策略', key: 'strategy', width: 100,
+      render: (_: any, record: any) => {
+        const strategy = getDocStrategy(record);
+        if (!strategy) return <span style={{ color: '#c4c0ba' }}>—</span>;
+        const s = strategyLabels[strategy] || { label: strategy, color: '#8a8580' };
+        return (
+          <Tag style={{ background: s.color + '14', color: s.color, border: 'none', fontSize: 11 }}>
+            {s.label}
+          </Tag>
+        );
+      },
+    },
+    {
+      title: '状态', dataIndex: 'status', key: 'status', width: 90,
       render: (v: string) => {
         const s = statusConfig[v] || { color: 'default', text: v };
         return <Badge status={s.color as any} text={<span style={{ fontSize: 12 }}>{s.text}</span>} />;
       },
     },
     {
-      title: '分块', dataIndex: 'chunk_count', key: 'chunks', width: 70,
+      title: '分块', dataIndex: 'chunk_count', key: 'chunks', width: 60,
       render: (v: number) => (
         <span style={{ fontVariantNumeric: 'tabular-nums' }}>{v || '—'}</span>
       ),
@@ -253,13 +267,15 @@ const KnowledgePage: React.FC = () => {
     },
   ];
 
+  const analysis = selectedDoc ? getDocAnalysis(selectedDoc) : null;
+
   return (
     <>
       {/* Page header */}
       <div className="page-header">
         <div>
           <h2>知识库</h2>
-          <div className="page-desc">管理文档集合与向量索引</div>
+          <div className="page-desc">上传文档后系统自动分析内容并选择最优分块策略</div>
         </div>
         <Button
           type="primary"
@@ -339,14 +355,9 @@ const KnowledgePage: React.FC = () => {
           <Form.Item name="description" label="描述">
             <TextArea placeholder="简要描述此知识库的用途" rows={3} style={{ borderRadius: 8 }} />
           </Form.Item>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <Form.Item name="domain_id" label="专业领域" style={{ marginBottom: 0 }}>
-              <Select placeholder="选择领域" allowClear options={domains.map(d => ({ label: d.name, value: d.id }))} />
-            </Form.Item>
-            <Form.Item name="chunk_strategy" label="分块策略" initialValue="recursive" style={{ marginBottom: 0 }}>
-              <Select options={chunkStrategies} />
-            </Form.Item>
-          </div>
+          <Form.Item name="domain_id" label="专业领域">
+            <Select placeholder="选择领域（可选）" allowClear options={domains.map(d => ({ label: d.name, value: d.id }))} />
+          </Form.Item>
         </Form>
       </Modal>
 
@@ -382,7 +393,7 @@ const KnowledgePage: React.FC = () => {
               <div className="empty-state" style={{ padding: '40px 20px' }}>
                 <FileOutlined className="empty-icon" />
                 <div className="empty-title">暂无文档</div>
-                <div className="empty-desc">上传 PDF、DOCX、TXT 或 MD 文件</div>
+                <div className="empty-desc">上传文件后系统自动分析内容并智能分块</div>
               </div>
             ),
           }}
@@ -404,6 +415,45 @@ const KnowledgePage: React.FC = () => {
         onClose={() => setChunkDrawerOpen(false)}
         width={640}
       >
+        {/* Analysis info banner */}
+        {analysis && (
+          <div style={{
+            background: '#fafaf8',
+            border: '1px solid #eae8e4',
+            borderRadius: 10,
+            padding: '14px 16px',
+            marginBottom: 20,
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              marginBottom: 8,
+            }}>
+              <ThunderboltOutlined style={{ color: '#e8653a', fontSize: 14 }} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a' }}>
+                自动分析结果
+              </span>
+              <Tag style={{
+                background: (strategyLabels[analysis.selected]?.color || '#8a8580') + '14',
+                color: strategyLabels[analysis.selected]?.color || '#8a8580',
+                border: 'none',
+                fontSize: 11,
+                marginLeft: 'auto',
+              }}>
+                {analysis.label || analysis.selected}
+              </Tag>
+            </div>
+            <div style={{
+              fontSize: 12,
+              color: '#6b6560',
+              lineHeight: 1.6,
+            }}>
+              {analysis.reasoning}
+            </div>
+          </div>
+        )}
+
         <List
           dataSource={chunks}
           renderItem={(item: any) => (
@@ -418,6 +468,11 @@ const KnowledgePage: React.FC = () => {
                   marginBottom: 8,
                 }}>
                   分块 #{item.chunk_index + 1}
+                  {item.token_count && (
+                    <span style={{ fontWeight: 400, marginLeft: 8, color: '#c4c0ba' }}>
+                      {item.token_count} 字符
+                    </span>
+                  )}
                 </div>
                 <div style={{
                   whiteSpace: 'pre-wrap',

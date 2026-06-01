@@ -61,6 +61,7 @@ uvicorn[standard]==0.34.0
 python-multipart==0.0.18
 sqlalchemy==2.0.36
 alembic==1.14.0
+aiosqlite==0.20.0
 python-jose[cryptography]==3.3.0
 bcrypt
 pydantic==2.10.3

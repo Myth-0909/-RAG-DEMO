@@ -23,6 +23,7 @@ def chunk_text(
         "recursive": _chunk_recursive,
         "parent_child": _chunk_parent_child,
         "semantic": _chunk_semantic,
+        "hybrid": _chunk_hybrid,
     }
     func = strategy_map.get(strategy, _chunk_recursive)
     return func(text, metadata, chunk_size, chunk_overlap)
@@ -135,6 +136,57 @@ def _chunk_semantic(
         for i, t in enumerate(merged)
         if t.strip()
     ]
+
+
+def _chunk_hybrid(
+    text: str, metadata: Dict[str, Any], chunk_size: int, chunk_overlap: int
+) -> List[ChunkResult]:
+    """
+    Hybrid chunking: uses parent-child for structured sections,
+    semantic chunking for narrative sections.
+
+    Detects section boundaries (headings, double newlines) and applies
+    the appropriate strategy to each section.
+    """
+    import re
+
+    # Split text into sections by headings or double newlines
+    section_pattern = re.compile(
+        r'(?=^#{1,6}\s|^[一二三四五六七八九十]+[、.]|^第[一二三四五六七八九十\d]+[章节]|\n\n)',
+        re.MULTILINE,
+    )
+    raw_sections = section_pattern.split(text)
+    sections = [s.strip() for s in raw_sections if s.strip()]
+
+    if not sections:
+        return _chunk_recursive(text, metadata, chunk_size, chunk_overlap)
+
+    chunks = []
+    idx = 0
+
+    for section in sections:
+        # Detect if section is structured (has sub-headings or lists)
+        has_heading = bool(re.search(r'^#{1,6}\s|^[一二三四五六七八九十]+[、.]', section, re.MULTILINE))
+        has_list = bool(re.search(r'^[\s]*[-*•\d.]\s+.+', section, re.MULTILINE))
+        is_structured = has_heading or has_list
+
+        if is_structured and len(section) > chunk_size:
+            # Use parent-child for structured sections
+            section_chunks = _chunk_parent_child(section, metadata, chunk_size, chunk_overlap)
+        elif len(section) > chunk_size * 2:
+            # Use semantic for longer narrative sections
+            section_chunks = _chunk_semantic(section, metadata, chunk_size, chunk_overlap)
+        else:
+            # Use recursive for shorter sections
+            section_chunks = _chunk_recursive(section, metadata, chunk_size, chunk_overlap)
+
+        # Re-index chunks sequentially
+        for chunk in section_chunks:
+            chunk.chunk_index = idx
+            chunks.append(chunk)
+            idx += 1
+
+    return chunks
 
 
 def _cosine_similarity(a: List[float], b: List[float]) -> float:
