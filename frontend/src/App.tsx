@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
+import './global.css';
 import AdminLayout from '@/layouts/AdminLayout';
 import LoginPage from '@/pages/login';
 import KnowledgePage from '@/pages/knowledge';
@@ -20,7 +21,56 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 
 const App: React.FC = () => {
   return (
-    <ConfigProvider locale={zhCN}>
+    <ConfigProvider
+      locale={zhCN}
+      theme={{
+        token: {
+          // Warm neutral palette
+          colorPrimary: '#e8653a',
+          colorBgContainer: '#ffffff',
+          colorBgLayout: '#f4f3f1',
+          colorBorder: '#eae8e4',
+          colorBorderSecondary: '#f0eeeb',
+          colorText: '#1a1a1a',
+          colorTextSecondary: '#6b6560',
+          colorTextTertiary: '#a09a94',
+          borderRadius: 8,
+          borderRadiusLG: 12,
+          fontFamily: "'DM Sans', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif",
+          fontSize: 14,
+          controlHeight: 38,
+          // Shadows — warm tinted
+          boxShadow: '0 1px 3px rgba(30,27,22,0.04), 0 4px 12px rgba(30,27,22,0.03)',
+          boxShadowSecondary: '0 4px 16px rgba(30,27,22,0.06)',
+        },
+        components: {
+          Table: {
+            headerBg: '#fafaf8',
+            headerColor: '#6b6560',
+            borderColor: '#f0eeeb',
+            rowHoverBg: '#fafaf8',
+          },
+          Card: {
+            headerFontSize: 16,
+          },
+          Menu: {
+            darkItemBg: 'transparent',
+            darkItemSelectedBg: 'rgba(255,255,255,0.08)',
+            darkItemHoverBg: 'rgba(255,255,255,0.04)',
+          },
+          Button: {
+            primaryShadow: '0 1px 2px rgba(232,101,58,0.15)',
+          },
+          Tag: {
+            defaultBg: '#f4f3f1',
+          },
+          Input: {
+            activeBorderColor: '#e8653a',
+            hoverBorderColor: '#d4572e',
+          },
+        },
+      }}
+    >
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />

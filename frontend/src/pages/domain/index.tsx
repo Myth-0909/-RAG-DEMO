@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Table, Button, Modal, Form, Input, Space, Tag, message, Popconfirm } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { Table, Button, Modal, Form, Input, Space, message, Popconfirm } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined, GlobalOutlined } from '@ant-design/icons';
 import { getDomains, createDomain, updateDomain, deleteDomain } from '@/services/api';
 
 const { TextArea } = Input;
@@ -28,10 +28,10 @@ const DomainPage: React.FC = () => {
     try {
       if (editingId) {
         await updateDomain(editingId, values);
-        message.success('更新成功');
+        message.success('已更新');
       } else {
         await createDomain(values);
-        message.success('创建成功');
+        message.success('已创建');
       }
       setModalOpen(false);
       form.resetFields();
@@ -51,31 +51,61 @@ const DomainPage: React.FC = () => {
   const handleDelete = async (id: number) => {
     try {
       await deleteDomain(id);
-      message.success('删除成功');
+      message.success('已删除');
       fetchData();
-    } catch (err: any) {
+    } catch {
       message.error('删除失败');
     }
   };
 
   const columns = [
-    { title: '名称', dataIndex: 'name', key: 'name' },
-    { title: '描述', dataIndex: 'description', key: 'description', ellipsis: true },
     {
-      title: '系统提示词', dataIndex: 'system_prompt', key: 'system_prompt',
-      ellipsis: true, width: 300,
+      title: '名称',
+      dataIndex: 'name',
+      key: 'name',
+      render: (v: string) => <span style={{ fontWeight: 500 }}>{v}</span>,
     },
     {
-      title: '状态', dataIndex: 'is_active', key: 'is_active',
-      render: (v: boolean) => <Tag color={v ? 'green' : 'default'}>{v ? '启用' : '禁用'}</Tag>,
+      title: '描述',
+      dataIndex: 'description',
+      key: 'description',
+      ellipsis: true,
+      render: (v: string) => <span style={{ color: '#8a8580' }}>{v || '—'}</span>,
     },
     {
-      title: '操作', key: 'action',
+      title: '系统提示词',
+      dataIndex: 'system_prompt',
+      key: 'system_prompt',
+      ellipsis: true,
+      width: 300,
+      render: (v: string) => (
+        <span style={{ color: '#6b6560', fontSize: 13 }}>
+          {v ? v.slice(0, 60) + (v.length > 60 ? '...' : '') : '—'}
+        </span>
+      ),
+    },
+    {
+      title: '状态',
+      dataIndex: 'is_active',
+      key: 'is_active',
+      width: 80,
+      render: (v: boolean) => (
+        <div style={{
+          width: 8, height: 8, borderRadius: '50%',
+          background: v ? '#4a9e6e' : '#c4c0ba',
+          display: 'inline-block',
+        }} />
+      ),
+    },
+    {
+      title: '',
+      key: 'action',
+      width: 100,
       render: (_: any, record: any) => (
-        <Space>
-          <Button type="link" icon={<EditOutlined />} onClick={() => handleEdit(record)}>编辑</Button>
-          <Popconfirm title="确定删除？" onConfirm={() => handleDelete(record.id)}>
-            <Button type="link" danger icon={<DeleteOutlined />}>删除</Button>
+        <Space size={4}>
+          <Button type="text" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)} style={{ color: '#6b6560' }} />
+          <Popconfirm title="确认删除?" onConfirm={() => handleDelete(record.id)} okText="删除" cancelText="取消">
+            <Button type="text" size="small" icon={<DeleteOutlined />} style={{ color: '#c4c0ba' }} />
           </Popconfirm>
         </Space>
       ),
@@ -84,32 +114,64 @@ const DomainPage: React.FC = () => {
 
   return (
     <>
-      <Card
-        title="专业领域管理"
-        extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingId(null); form.resetFields(); setModalOpen(true); }}>新建领域</Button>}
-      >
-        <Table columns={columns} dataSource={domains} rowKey="id" loading={loading} />
-      </Card>
+      <div className="page-header">
+        <div>
+          <h2>专业领域</h2>
+          <div className="page-desc">配置不同领域的系统提示词与专业知识</div>
+        </div>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          onClick={() => { setEditingId(null); form.resetFields(); setModalOpen(true); }}
+          style={{ borderRadius: 8, fontWeight: 500 }}
+        >
+          新建领域
+        </Button>
+      </div>
+
+      <div style={{
+        background: '#fff', borderRadius: 12, border: '1px solid #eae8e4', overflow: 'hidden',
+      }}>
+        <Table
+          columns={columns}
+          dataSource={domains}
+          rowKey="id"
+          loading={loading}
+          pagination={false}
+          locale={{
+            emptyText: (
+              <div className="empty-state">
+                <GlobalOutlined className="empty-icon" />
+                <div className="empty-title">暂无领域</div>
+                <div className="empty-desc">创建领域以配置专业问答的上下文</div>
+              </div>
+            ),
+          }}
+        />
+      </div>
 
       <Modal
-        title={editingId ? '编辑领域' : '新建领域'}
+        title={<span style={{ fontWeight: 600 }}>{editingId ? '编辑领域' : '新建领域'}</span>}
         open={modalOpen}
         onCancel={() => { setModalOpen(false); setEditingId(null); }}
         onOk={() => form.submit()}
+        okText={editingId ? '保存' : '创建'}
+        cancelText="取消"
         destroyOnClose
-        width={600}
+        width={560}
       >
-        <Form form={form} onFinish={handleSubmit} layout="vertical">
-          <Form.Item name="name" label="名称" rules={[{ required: true }]}>
-            <Input placeholder="领域名称" />
+        <Form form={form} onFinish={handleSubmit} layout="vertical" style={{ marginTop: 20 }}>
+          <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
+            <Input placeholder="例如：法律顾问" style={{ borderRadius: 8 }} />
           </Form.Item>
           <Form.Item name="description" label="描述">
-            <TextArea placeholder="领域描述" rows={2} />
+            <Input placeholder="领域简述" style={{ borderRadius: 8 }} />
           </Form.Item>
           <Form.Item name="system_prompt" label="系统提示词">
             <TextArea
-              placeholder="设置该领域下 AI 回答的专业指导，例如：你是一名法律顾问，请以专业法律术语回答问题..."
-              rows={6}
+              placeholder="设置该领域 AI 回答的专业指导，例如：&#10;你是一名资深法律顾问，请以专业法律术语回答问题，引用相关法条。"
+              rows={5}
+              style={{ borderRadius: 8 }}
             />
           </Form.Item>
         </Form>

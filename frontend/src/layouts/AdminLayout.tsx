@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Layout, Menu, Avatar, Dropdown, theme, Space, Typography } from 'antd';
+import { Layout, Menu, Avatar, Dropdown, Space, Typography } from 'antd';
 import {
   DatabaseOutlined,
   MessageOutlined,
@@ -22,7 +22,7 @@ const menuItems = [
   {
     key: '/knowledge',
     icon: <DatabaseOutlined />,
-    label: '知识库管理',
+    label: '知识库',
   },
   {
     key: '/chat',
@@ -37,7 +37,7 @@ const menuItems = [
   {
     key: '/system',
     icon: <SettingOutlined />,
-    label: '系统管理',
+    label: '系统',
     children: [
       { key: '/system/users', icon: <UserOutlined />, label: '用户管理' },
       { key: '/system/roles', icon: <TeamOutlined />, label: '角色管理' },
@@ -50,7 +50,6 @@ const AdminLayout: React.FC = () => {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
   const [userName, setUserName] = useState('管理员');
-  const { token: { colorBgContainer, borderRadiusLG } } = theme.useToken();
 
   useEffect(() => {
     const info = getUserInfo();
@@ -73,42 +72,111 @@ const AdminLayout: React.FC = () => {
   ];
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
-      <Sider trigger={null} collapsible collapsed={collapsed} theme="dark">
-        <div style={{
-          height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: '#fff', fontSize: collapsed ? 14 : 18, fontWeight: 'bold',
-        }}>
-          {collapsed ? 'RAG' : 'RAG 知识库'}
+    <Layout style={{ minHeight: '100dvh' }}>
+      <Sider
+        trigger={null}
+        collapsible
+        collapsed={collapsed}
+        width={220}
+        collapsedWidth={64}
+        className="admin-sider"
+        style={{
+          borderRight: 'none',
+          position: 'fixed',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          zIndex: 100,
+        }}
+      >
+        <div className="sider-logo">
+          <div className="logo-mark">R</div>
+          {!collapsed && <span className="logo-text">RAG System</span>}
         </div>
+
         <Menu
           theme="dark"
           mode="inline"
           selectedKeys={[location.pathname]}
-          defaultOpenKeys={['/system']}
+          defaultOpenKeys={collapsed ? [] : ['/system']}
           items={menuItems}
           onClick={({ key }) => navigate(key)}
+          style={{
+            marginTop: 8,
+            borderRight: 'none',
+            fontSize: 13,
+          }}
         />
       </Sider>
-      <Layout>
+
+      <Layout style={{ marginLeft: collapsed ? 64 : 220, transition: 'margin-left 0.2s ease' }}>
         <Header style={{
-          padding: '0 24px', background: colorBgContainer,
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          height: 56,
+          lineHeight: '56px',
+          padding: '0 28px',
+          background: '#fff',
+          borderBottom: '1px solid #eae8e4',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          position: 'sticky',
+          top: 0,
+          zIndex: 50,
         }}>
-          <Space>
-            {React.createElement(collapsed ? MenuUnfoldOutlined : MenuFoldOutlined, {
-              onClick: () => setCollapsed(!collapsed),
-              style: { fontSize: 18, cursor: 'pointer' },
-            })}
-          </Space>
-          <Dropdown menu={{ items: userMenuItems }}>
-            <Space style={{ cursor: 'pointer' }}>
-              <Avatar icon={<UserOutlined />} />
-              <Text>{userName}</Text>
+          <button
+            onClick={() => setCollapsed(!collapsed)}
+            style={{
+              border: 'none',
+              background: 'none',
+              cursor: 'pointer',
+              fontSize: 16,
+              color: '#6b6560',
+              padding: '6px 8px',
+              borderRadius: 6,
+              display: 'flex',
+              alignItems: 'center',
+            }}
+            onMouseEnter={e => (e.currentTarget.style.background = '#f4f3f1')}
+            onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+          >
+            {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+          </button>
+
+          <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
+            <Space
+              style={{
+                cursor: 'pointer',
+                padding: '4px 12px 4px 4px',
+                borderRadius: 20,
+                transition: 'background 0.2s',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = '#f4f3f1')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            >
+              <Avatar
+                size={30}
+                style={{
+                  background: '#e8653a',
+                  fontSize: 13,
+                  fontWeight: 600,
+                }}
+              >
+                {userName?.[0]?.toUpperCase()}
+              </Avatar>
+              <Text style={{
+                fontSize: 13,
+                fontWeight: 500,
+                color: '#1a1a1a',
+              }}>{userName}</Text>
             </Space>
           </Dropdown>
         </Header>
-        <Content style={{ margin: 24, padding: 24, background: colorBgContainer, borderRadius: borderRadiusLG, overflow: 'auto' }}>
+
+        <Content style={{
+          padding: '28px 28px 40px',
+          minHeight: 'calc(100dvh - 56px)',
+          background: '#f4f3f1',
+        }}>
           <Outlet />
         </Content>
       </Layout>

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Table, Button, Modal, Form, Input, Tree, Space, Tag, message, Popconfirm } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { Table, Button, Modal, Form, Input, Tree, Space, Tag, message, Popconfirm } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined, TeamOutlined } from '@ant-design/icons';
 import { getRoles, createRole, updateRole, deleteRole, getPermissionTree } from '@/services/api';
 
 const RolePage: React.FC = () => {
@@ -27,7 +27,14 @@ const RolePage: React.FC = () => {
 
   const treeData = permTree.map(function toTreeNode(p: any): any {
     return {
-      title: `${p.name} (${p.type === 'menu' ? '菜单' : p.type === 'button' ? '按钮' : '接口'})`,
+      title: (
+        <span style={{ fontSize: 13 }}>
+          {p.name}
+          <span style={{ color: '#a09a94', fontSize: 11, marginLeft: 6 }}>
+            {p.type === 'menu' ? '菜单' : p.type === 'button' ? '按钮' : '接口'}
+          </span>
+        </span>
+      ),
       key: p.id,
       children: p.children?.map(toTreeNode) || [],
     };
@@ -38,10 +45,10 @@ const RolePage: React.FC = () => {
       const data = { ...values, permission_ids: checkedKeys };
       if (editingId) {
         await updateRole(editingId, data);
-        message.success('更新成功');
+        message.success('已更新');
       } else {
         await createRole(data);
-        message.success('创建成功');
+        message.success('已创建');
       }
       setModalOpen(false);
       form.resetFields();
@@ -63,7 +70,7 @@ const RolePage: React.FC = () => {
   const handleDelete = async (id: number) => {
     try {
       await deleteRole(id);
-      message.success('删除成功');
+      message.success('已删除');
       fetchData();
     } catch (err: any) {
       message.error(err.response?.data?.detail || '删除失败');
@@ -71,25 +78,48 @@ const RolePage: React.FC = () => {
   };
 
   const columns = [
-    { title: '角色名', dataIndex: 'name', key: 'name' },
-    { title: '描述', dataIndex: 'description', key: 'description' },
     {
-      title: '类型', dataIndex: 'is_system', key: 'is_system',
-      render: (v: boolean) => v ? <Tag color="gold">系统</Tag> : <Tag>自定义</Tag>,
-    },
-    {
-      title: '权限数', key: 'perm_count',
-      render: (_: any, record: any) => record.permissions?.length || 0,
-    },
-    {
-      title: '操作', key: 'action',
+      title: '角色',
+      key: 'role',
       render: (_: any, record: any) => (
-        <Space>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontWeight: 500 }}>{record.name}</span>
+          {record.is_system && (
+            <Tag style={{
+              background: '#fdf2ed', color: '#e8653a', border: 'none',
+              fontSize: 10, padding: '0 6px', borderRadius: 3,
+            }}>系统</Tag>
+          )}
+        </div>
+      ),
+    },
+    {
+      title: '描述',
+      dataIndex: 'description',
+      key: 'description',
+      render: (v: string) => <span style={{ color: '#8a8580' }}>{v || '—'}</span>,
+    },
+    {
+      title: '权限',
+      key: 'perm_count',
+      width: 80,
+      render: (_: any, record: any) => (
+        <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 500 }}>
+          {record.permissions?.length || 0}
+        </span>
+      ),
+    },
+    {
+      title: '',
+      key: 'action',
+      width: 100,
+      render: (_: any, record: any) => (
+        <Space size={4}>
           {!record.is_system && (
             <>
-              <Button type="link" icon={<EditOutlined />} onClick={() => handleEdit(record)}>编辑</Button>
-              <Popconfirm title="确定删除？" onConfirm={() => handleDelete(record.id)}>
-                <Button type="link" danger icon={<DeleteOutlined />}>删除</Button>
+              <Button type="text" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)} style={{ color: '#6b6560' }} />
+              <Popconfirm title="确认删除?" onConfirm={() => handleDelete(record.id)} okText="删除" cancelText="取消">
+                <Button type="text" size="small" icon={<DeleteOutlined />} style={{ color: '#c4c0ba' }} />
               </Popconfirm>
             </>
           )}
@@ -100,35 +130,74 @@ const RolePage: React.FC = () => {
 
   return (
     <>
-      <Card
-        title="角色管理"
-        extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingId(null); form.resetFields(); setCheckedKeys([]); setModalOpen(true); }}>新建角色</Button>}
-      >
-        <Table columns={columns} dataSource={roles} rowKey="id" loading={loading} />
-      </Card>
+      <div className="page-header">
+        <div>
+          <h2>角色管理</h2>
+          <div className="page-desc">配置角色与权限分配</div>
+        </div>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          onClick={() => { setEditingId(null); form.resetFields(); setCheckedKeys([]); setModalOpen(true); }}
+          style={{ borderRadius: 8, fontWeight: 500 }}
+        >
+          新建角色
+        </Button>
+      </div>
+
+      <div style={{
+        background: '#fff', borderRadius: 12, border: '1px solid #eae8e4', overflow: 'hidden',
+      }}>
+        <Table
+          columns={columns}
+          dataSource={roles}
+          rowKey="id"
+          loading={loading}
+          pagination={false}
+          locale={{
+            emptyText: (
+              <div className="empty-state">
+                <TeamOutlined className="empty-icon" />
+                <div className="empty-title">暂无角色</div>
+              </div>
+            ),
+          }}
+        />
+      </div>
 
       <Modal
-        title={editingId ? '编辑角色' : '新建角色'}
+        title={<span style={{ fontWeight: 600 }}>{editingId ? '编辑角色' : '新建角色'}</span>}
         open={modalOpen}
         onCancel={() => { setModalOpen(false); setEditingId(null); }}
         onOk={() => form.submit()}
+        okText={editingId ? '保存' : '创建'}
+        cancelText="取消"
         destroyOnClose
-        width={500}
+        width={480}
       >
-        <Form form={form} onFinish={handleSubmit} layout="vertical">
-          <Form.Item name="name" label="角色名" rules={[{ required: true }]}>
-            <Input placeholder="角色名称" />
+        <Form form={form} onFinish={handleSubmit} layout="vertical" style={{ marginTop: 20 }}>
+          <Form.Item name="name" label="角色名" rules={[{ required: true, message: '请输入角色名' }]}>
+            <Input placeholder="例如：编辑员" style={{ borderRadius: 8 }} />
           </Form.Item>
           <Form.Item name="description" label="描述">
-            <Input placeholder="角色描述" />
+            <Input placeholder="角色描述" style={{ borderRadius: 8 }} />
           </Form.Item>
-          <Form.Item label="权限分配">
-            <Tree
-              checkable
-              treeData={treeData}
-              checkedKeys={checkedKeys}
-              onCheck={(keys: any) => setCheckedKeys(keys as number[])}
-            />
+          <Form.Item label={<span style={{ fontWeight: 500, fontSize: 13, color: '#6b6560' }}>权限分配</span>}>
+            <div style={{
+              background: '#fafaf8',
+              border: '1px solid #eae8e4',
+              borderRadius: 8,
+              padding: '12px 16px',
+              maxHeight: 280,
+              overflow: 'auto',
+            }}>
+              <Tree
+                checkable
+                treeData={treeData}
+                checkedKeys={checkedKeys}
+                onCheck={(keys: any) => setCheckedKeys(keys as number[])}
+              />
+            </div>
           </Form.Item>
         </Form>
       </Modal>

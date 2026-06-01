@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Table, Button, Modal, Form, Input, Select, Space, Tag, Switch, message, Popconfirm } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { Table, Button, Modal, Form, Input, Select, Space, Tag, message, Popconfirm } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined, UserOutlined } from '@ant-design/icons';
 import { getUsers, createUser, updateUser, deleteUser, getRoles } from '@/services/api';
 
 const UserPage: React.FC = () => {
@@ -28,10 +28,10 @@ const UserPage: React.FC = () => {
     try {
       if (editingId) {
         await updateUser(editingId, values);
-        message.success('更新成功');
+        message.success('已更新');
       } else {
         await createUser(values);
-        message.success('创建成功');
+        message.success('已创建');
       }
       setModalOpen(false);
       form.resetFields();
@@ -54,41 +54,77 @@ const UserPage: React.FC = () => {
   const handleDelete = async (id: number) => {
     try {
       await deleteUser(id);
-      message.success('删除成功');
+      message.success('已删除');
       fetchData();
-    } catch (err: any) {
+    } catch {
       message.error('删除失败');
     }
   };
 
   const columns = [
-    { title: '用户名', dataIndex: 'username', key: 'username' },
-    { title: '姓名', dataIndex: 'full_name', key: 'full_name' },
-    { title: '邮箱', dataIndex: 'email', key: 'email' },
     {
-      title: '角色', key: 'roles',
+      title: '用户',
+      key: 'user',
       render: (_: any, record: any) => (
         <Space>
-          {record.roles?.map((r: any) => <Tag key={r.id} color="blue">{r.name}</Tag>)}
+          <div style={{
+            width: 32, height: 32, borderRadius: 8,
+            background: record.is_superuser ? '#e8653a' : '#f4f3f1',
+            color: record.is_superuser ? '#fff' : '#6b6560',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontWeight: 600, fontSize: 13,
+          }}>
+            {(record.full_name || record.username)?.[0]?.toUpperCase()}
+          </div>
+          <div>
+            <div style={{ fontWeight: 500, fontSize: 14 }}>{record.full_name || record.username}</div>
+            <div style={{ fontSize: 12, color: '#8a8580' }}>@{record.username}</div>
+          </div>
         </Space>
       ),
     },
     {
-      title: '状态', dataIndex: 'is_active', key: 'is_active',
-      render: (v: boolean) => <Tag color={v ? 'green' : 'default'}>{v ? '启用' : '禁用'}</Tag>,
+      title: '邮箱',
+      dataIndex: 'email',
+      key: 'email',
+      render: (v: string) => <span style={{ color: '#6b6560', fontSize: 13 }}>{v || '—'}</span>,
     },
     {
-      title: '管理员', dataIndex: 'is_superuser', key: 'is_superuser',
-      render: (v: boolean) => v ? <Tag color="gold">超级管理员</Tag> : null,
-    },
-    {
-      title: '操作', key: 'action',
+      title: '角色',
+      key: 'roles',
       render: (_: any, record: any) => (
-        <Space>
-          <Button type="link" icon={<EditOutlined />} onClick={() => handleEdit(record)}>编辑</Button>
+        <Space size={4}>
+          {record.roles?.map((r: any) => (
+            <Tag key={r.id} style={{ background: '#f4f3f1', color: '#6b6560', border: 'none' }}>
+              {r.name}
+            </Tag>
+          ))}
+        </Space>
+      ),
+    },
+    {
+      title: '状态',
+      dataIndex: 'is_active',
+      key: 'is_active',
+      width: 80,
+      render: (v: boolean) => (
+        <div style={{
+          width: 8, height: 8, borderRadius: '50%',
+          background: v ? '#4a9e6e' : '#c4c0ba',
+          display: 'inline-block',
+        }} />
+      ),
+    },
+    {
+      title: '',
+      key: 'action',
+      width: 100,
+      render: (_: any, record: any) => (
+        <Space size={4}>
+          <Button type="text" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)} style={{ color: '#6b6560' }} />
           {!record.is_superuser && (
-            <Popconfirm title="确定删除？" onConfirm={() => handleDelete(record.id)}>
-              <Button type="link" danger icon={<DeleteOutlined />}>删除</Button>
+            <Popconfirm title="确认删除?" onConfirm={() => handleDelete(record.id)} okText="删除" cancelText="取消">
+              <Button type="text" size="small" icon={<DeleteOutlined />} style={{ color: '#c4c0ba' }} />
             </Popconfirm>
           )}
         </Space>
@@ -98,37 +134,73 @@ const UserPage: React.FC = () => {
 
   return (
     <>
-      <Card
-        title="用户管理"
-        extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingId(null); form.resetFields(); setModalOpen(true); }}>新建用户</Button>}
-      >
-        <Table columns={columns} dataSource={users} rowKey="id" loading={loading} />
-      </Card>
+      <div className="page-header">
+        <div>
+          <h2>用户管理</h2>
+          <div className="page-desc">管理系统用户、分配角色与权限</div>
+        </div>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          onClick={() => { setEditingId(null); form.resetFields(); setModalOpen(true); }}
+          style={{ borderRadius: 8, fontWeight: 500 }}
+        >
+          新建用户
+        </Button>
+      </div>
+
+      <div style={{
+        background: '#fff', borderRadius: 12, border: '1px solid #eae8e4', overflow: 'hidden',
+      }}>
+        <Table
+          columns={columns}
+          dataSource={users}
+          rowKey="id"
+          loading={loading}
+          pagination={false}
+          locale={{
+            emptyText: (
+              <div className="empty-state">
+                <UserOutlined className="empty-icon" />
+                <div className="empty-title">暂无用户</div>
+              </div>
+            ),
+          }}
+        />
+      </div>
 
       <Modal
-        title={editingId ? '编辑用户' : '新建用户'}
+        title={<span style={{ fontWeight: 600 }}>{editingId ? '编辑用户' : '新建用户'}</span>}
         open={modalOpen}
         onCancel={() => { setModalOpen(false); setEditingId(null); }}
         onOk={() => form.submit()}
+        okText={editingId ? '保存' : '创建'}
+        cancelText="取消"
         destroyOnClose
       >
-        <Form form={form} onFinish={handleSubmit} layout="vertical">
+        <Form form={form} onFinish={handleSubmit} layout="vertical" style={{ marginTop: 20 }}>
           <Form.Item name="username" label="用户名" rules={[{ required: !editingId }]}>
-            <Input placeholder="用户名" disabled={!!editingId} />
+            <Input placeholder="用户名" disabled={!!editingId} style={{ borderRadius: 8 }} />
           </Form.Item>
           {!editingId && (
             <Form.Item name="password" label="密码" rules={[{ required: true, min: 6 }]}>
-              <Input.Password placeholder="密码（至少6位）" />
+              <Input.Password placeholder="至少 6 位" style={{ borderRadius: 8 }} />
             </Form.Item>
           )}
-          <Form.Item name="full_name" label="姓名">
-            <Input placeholder="姓名" />
-          </Form.Item>
-          <Form.Item name="email" label="邮箱">
-            <Input placeholder="邮箱" />
-          </Form.Item>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <Form.Item name="full_name" label="姓名">
+              <Input placeholder="显示名称" style={{ borderRadius: 8 }} />
+            </Form.Item>
+            <Form.Item name="email" label="邮箱">
+              <Input placeholder="email" style={{ borderRadius: 8 }} />
+            </Form.Item>
+          </div>
           <Form.Item name="role_ids" label="角色">
-            <Select mode="multiple" placeholder="选择角色" options={roles.map(r => ({ label: r.name, value: r.id }))} />
+            <Select
+              mode="multiple"
+              placeholder="选择角色"
+              options={roles.map(r => ({ label: r.name, value: r.id }))}
+            />
           </Form.Item>
         </Form>
       </Modal>

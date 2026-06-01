@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(redesign-existing-projects)",
+      "Bash(npx *)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ]
+  },
+  "$version": 4
+}

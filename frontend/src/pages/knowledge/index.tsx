@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Card, Table, Button, Modal, Form, Input, Select, Space, Tag, Upload,
-  message, Popconfirm, Drawer, List, Badge, Progress, Tooltip,
+  Table, Button, Modal, Form, Input, Select, Space, Tag, Upload,
+  message, Popconfirm, Drawer, List, Badge, Tooltip, Divider,
 } from 'antd';
 import {
   PlusOutlined, UploadOutlined, DeleteOutlined, FileTextOutlined,
-  EyeOutlined, ReloadOutlined,
+  EyeOutlined, ReloadOutlined, DatabaseOutlined, FileOutlined,
+  AppstoreOutlined,
 } from '@ant-design/icons';
 import {
   getKnowledgeBases, createKnowledgeBase, deleteKnowledgeBase,
@@ -15,14 +16,14 @@ import {
 const { TextArea } = Input;
 
 const chunkStrategies = [
-  { label: '递归字符分块', value: 'recursive' },
-  { label: '固定大小分块', value: 'fixed' },
+  { label: '递归字符', value: 'recursive' },
+  { label: '固定大小', value: 'fixed' },
   { label: '父子分块', value: 'parent_child' },
   { label: '语义分块', value: 'semantic' },
 ];
 
-const statusMap: Record<string, { color: string; text: string }> = {
-  pending: { color: 'default', text: '待处理' },
+const statusConfig: Record<string, { color: string; text: string }> = {
+  pending: { color: 'default', text: '等待中' },
   processing: { color: 'processing', text: '处理中' },
   completed: { color: 'success', text: '已完成' },
   failed: { color: 'error', text: '失败' },
@@ -71,9 +72,9 @@ const KnowledgePage: React.FC = () => {
   const handleDelete = async (id: number) => {
     try {
       await deleteKnowledgeBase(id);
-      message.success('删除成功');
+      message.success('已删除');
       fetchData();
-    } catch (err: any) {
+    } catch {
       message.error('删除失败');
     }
   };
@@ -85,6 +86,12 @@ const KnowledgePage: React.FC = () => {
     setDocs(res.data);
   };
 
+  const refreshDocs = async () => {
+    if (!selectedKb) return;
+    const res = await getDocuments(selectedKb.id);
+    setDocs(res.data);
+  };
+
   const handleUpload = async (file: File) => {
     if (!selectedKb) return false;
     const formData = new FormData();
@@ -92,10 +99,9 @@ const KnowledgePage: React.FC = () => {
     formData.append('metadata_json', JSON.stringify({ author: 'admin' }));
     try {
       await uploadDocument(selectedKb.id, formData);
-      message.success('上传成功，正在后台处理');
-      const res = await getDocuments(selectedKb.id);
-      setDocs(res.data);
-    } catch (err: any) {
+      message.success('已上传，后台处理中');
+      refreshDocs();
+    } catch {
       message.error('上传失败');
     }
     return false;
@@ -105,10 +111,9 @@ const KnowledgePage: React.FC = () => {
     if (!selectedKb) return;
     try {
       await deleteDocument(selectedKb.id, docId);
-      message.success('删除成功');
-      const res = await getDocuments(selectedKb.id);
-      setDocs(res.data);
-    } catch (err: any) {
+      message.success('已删除');
+      refreshDocs();
+    } catch {
       message.error('删除失败');
     }
   };
@@ -121,25 +126,76 @@ const KnowledgePage: React.FC = () => {
     setChunks(res.data);
   };
 
+  // Stats
+  const totalDocs = kbs.reduce((s, kb) => s + (kb.document_count || 0), 0);
+  const activeKbs = kbs.filter(kb => kb.is_active).length;
+
   const kbColumns = [
-    { title: '名称', dataIndex: 'name', key: 'name' },
-    { title: '描述', dataIndex: 'description', key: 'description', ellipsis: true },
+    {
+      title: '名称',
+      dataIndex: 'name',
+      key: 'name',
+      render: (name: string, record: any) => (
+        <a
+          onClick={() => openDocs(record)}
+          style={{ fontWeight: 500, color: '#1a1a1a' }}
+        >
+          {name}
+        </a>
+      ),
+    },
+    { title: '描述', dataIndex: 'description', key: 'description', ellipsis: true,
+      render: (v: string) => <span style={{ color: '#8a8580' }}>{v || '—'}</span>,
+    },
     {
       title: '分块策略', dataIndex: 'chunk_strategy', key: 'chunk_strategy',
-      render: (v: string) => chunkStrategies.find(s => s.value === v)?.label || v,
+      width: 120,
+      render: (v: string) => {
+        const label = chunkStrategies.find(s => s.value === v)?.label || v;
+        return <Tag style={{ background: '#f4f3f1', color: '#6b6560' }}>{label}</Tag>;
+      },
     },
-    { title: '文档数', dataIndex: 'document_count', key: 'document_count' },
     {
-      title: '状态', dataIndex: 'is_active', key: 'is_active',
-      render: (v: boolean) => <Tag color={v ? 'green' : 'default'}>{v ? '启用' : '禁用'}</Tag>,
+      title: '文档',
+      dataIndex: 'document_count',
+      key: 'document_count',
+      width: 80,
+      render: (v: number) => (
+        <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 500 }}>{v}</span>
+      ),
     },
     {
-      title: '操作', key: 'action',
+      title: '状态',
+      dataIndex: 'is_active',
+      key: 'is_active',
+      width: 80,
+      render: (v: boolean) => (
+        <div style={{
+          width: 8,
+          height: 8,
+          borderRadius: '50%',
+          background: v ? '#4a9e6e' : '#c4c0ba',
+          display: 'inline-block',
+        }} />
+      ),
+    },
+    {
+      title: '',
+      key: 'action',
+      width: 100,
       render: (_: any, record: any) => (
-        <Space>
-          <Button type="link" icon={<FileTextOutlined />} onClick={() => openDocs(record)}>文档</Button>
-          <Popconfirm title="确定删除？" onConfirm={() => handleDelete(record.id)}>
-            <Button type="link" danger icon={<DeleteOutlined />}>删除</Button>
+        <Space size={4}>
+          <Tooltip title="查看文档">
+            <Button
+              type="text"
+              size="small"
+              icon={<FileTextOutlined />}
+              onClick={() => openDocs(record)}
+              style={{ color: '#6b6560' }}
+            />
+          </Tooltip>
+          <Popconfirm title="确认删除此知识库?" onConfirm={() => handleDelete(record.id)} okText="删除" cancelText="取消">
+            <Button type="text" size="small" icon={<DeleteOutlined />} style={{ color: '#c4c0ba' }} />
           </Popconfirm>
         </Space>
       ),
@@ -147,31 +203,50 @@ const KnowledgePage: React.FC = () => {
   ];
 
   const docColumns = [
-    { title: '文件名', dataIndex: 'original_filename', key: 'filename', ellipsis: true },
-    { title: '类型', dataIndex: 'file_type', key: 'type', width: 80 },
+    { title: '文件名', dataIndex: 'original_filename', key: 'filename', ellipsis: true,
+      render: (v: string) => <span style={{ fontWeight: 500 }}>{v}</span>,
+    },
     {
-      title: '大小', dataIndex: 'file_size', key: 'size', width: 100,
-      render: (v: number) => v ? `${(v / 1024).toFixed(1)} KB` : '-',
+      title: '类型', dataIndex: 'file_type', key: 'type', width: 70,
+      render: (v: string) => (
+        <span style={{
+          fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
+          letterSpacing: '0.04em', color: '#8a8580',
+        }}>{v}</span>
+      ),
+    },
+    {
+      title: '大小', dataIndex: 'file_size', key: 'size', width: 90,
+      render: (v: number) => (
+        <span style={{ fontVariantNumeric: 'tabular-nums', color: '#6b6560', fontSize: 13 }}>
+          {v ? `${(v / 1024).toFixed(1)} KB` : '—'}
+        </span>
+      ),
     },
     {
       title: '状态', dataIndex: 'status', key: 'status', width: 100,
       render: (v: string) => {
-        const s = statusMap[v] || { color: 'default', text: v };
-        return <Badge status={s.color as any} text={s.text} />;
+        const s = statusConfig[v] || { color: 'default', text: v };
+        return <Badge status={s.color as any} text={<span style={{ fontSize: 12 }}>{s.text}</span>} />;
       },
     },
-    { title: '分块数', dataIndex: 'chunk_count', key: 'chunks', width: 80 },
     {
-      title: '操作', key: 'action', width: 120,
+      title: '分块', dataIndex: 'chunk_count', key: 'chunks', width: 70,
+      render: (v: number) => (
+        <span style={{ fontVariantNumeric: 'tabular-nums' }}>{v || '—'}</span>
+      ),
+    },
+    {
+      title: '', key: 'action', width: 80,
       render: (_: any, record: any) => (
-        <Space>
+        <Space size={2}>
           {record.status === 'completed' && (
             <Tooltip title="查看分块">
-              <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => openChunks(record)} />
+              <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => openChunks(record)} style={{ color: '#6b6560' }} />
             </Tooltip>
           )}
-          <Popconfirm title="确定删除？" onConfirm={() => handleDeleteDoc(record.id)}>
-            <Button type="link" danger size="small" icon={<DeleteOutlined />} />
+          <Popconfirm title="确认删除?" onConfirm={() => handleDeleteDoc(record.id)} okText="删除" cancelText="取消">
+            <Button type="text" size="small" icon={<DeleteOutlined />} style={{ color: '#c4c0ba' }} />
           </Popconfirm>
         </Space>
       ),
@@ -180,70 +255,196 @@ const KnowledgePage: React.FC = () => {
 
   return (
     <>
-      <Card
-        title="知识库管理"
-        extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>新建知识库</Button>}
-      >
-        <Table columns={kbColumns} dataSource={kbs} rowKey="id" loading={loading} />
-      </Card>
+      {/* Page header */}
+      <div className="page-header">
+        <div>
+          <h2>知识库</h2>
+          <div className="page-desc">管理文档集合与向量索引</div>
+        </div>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          onClick={() => setModalOpen(true)}
+          style={{ borderRadius: 8, fontWeight: 500 }}
+        >
+          新建知识库
+        </Button>
+      </div>
 
-      <Modal title="新建知识库" open={modalOpen} onCancel={() => setModalOpen(false)} onOk={() => form.submit()} destroyOnClose>
-        <Form form={form} onFinish={handleCreate} layout="vertical">
-          <Form.Item name="name" label="名称" rules={[{ required: true }]}>
-            <Input placeholder="知识库名称" />
+      {/* Stat cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
+        <div className="stat-card">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <DatabaseOutlined style={{ fontSize: 16, color: '#e8653a' }} />
+            <span className="stat-label">知识库总数</span>
+          </div>
+          <div className="stat-value">{kbs.length}</div>
+        </div>
+        <div className="stat-card">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <AppstoreOutlined style={{ fontSize: 16, color: '#4a9e6e' }} />
+            <span className="stat-label">活跃知识库</span>
+          </div>
+          <div className="stat-value">{activeKbs}</div>
+        </div>
+        <div className="stat-card">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <FileOutlined style={{ fontSize: 16, color: '#5b8ec9' }} />
+            <span className="stat-label">文档总数</span>
+          </div>
+          <div className="stat-value">{totalDocs}</div>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div style={{
+        background: '#fff',
+        borderRadius: 12,
+        border: '1px solid #eae8e4',
+        overflow: 'hidden',
+      }}>
+        <Table
+          columns={kbColumns}
+          dataSource={kbs}
+          rowKey="id"
+          loading={loading}
+          pagination={false}
+          style={{ margin: 0 }}
+          locale={{
+            emptyText: (
+              <div className="empty-state">
+                <DatabaseOutlined className="empty-icon" />
+                <div className="empty-title">暂无知识库</div>
+                <div className="empty-desc">点击右上角按钮创建第一个知识库</div>
+              </div>
+            ),
+          }}
+        />
+      </div>
+
+      {/* Create modal */}
+      <Modal
+        title={<span style={{ fontWeight: 600 }}>新建知识库</span>}
+        open={modalOpen}
+        onCancel={() => setModalOpen(false)}
+        onOk={() => form.submit()}
+        okText="创建"
+        cancelText="取消"
+        destroyOnClose
+      >
+        <Form form={form} onFinish={handleCreate} layout="vertical" style={{ marginTop: 20 }}>
+          <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
+            <Input placeholder="例如：产品手册库" style={{ borderRadius: 8 }} />
           </Form.Item>
           <Form.Item name="description" label="描述">
-            <TextArea placeholder="知识库描述" rows={3} />
+            <TextArea placeholder="简要描述此知识库的用途" rows={3} style={{ borderRadius: 8 }} />
           </Form.Item>
-          <Form.Item name="domain_id" label="专业领域">
-            <Select placeholder="选择领域" allowClear options={domains.map(d => ({ label: d.name, value: d.id }))} />
-          </Form.Item>
-          <Form.Item name="chunk_strategy" label="分块策略" initialValue="recursive">
-            <Select options={chunkStrategies} />
-          </Form.Item>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <Form.Item name="domain_id" label="专业领域" style={{ marginBottom: 0 }}>
+              <Select placeholder="选择领域" allowClear options={domains.map(d => ({ label: d.name, value: d.id }))} />
+            </Form.Item>
+            <Form.Item name="chunk_strategy" label="分块策略" initialValue="recursive" style={{ marginBottom: 0 }}>
+              <Select options={chunkStrategies} />
+            </Form.Item>
+          </div>
         </Form>
       </Modal>
 
+      {/* Document drawer */}
       <Drawer
-        title={`文档列表 - ${selectedKb?.name || ''}`}
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <FileTextOutlined style={{ color: '#e8653a' }} />
+            <span style={{ fontWeight: 600 }}>{selectedKb?.name}</span>
+            <span style={{ fontSize: 13, color: '#8a8580', fontWeight: 400 }}>文档列表</span>
+          </div>
+        }
         open={docDrawerOpen}
         onClose={() => setDocDrawerOpen(false)}
-        width={800}
+        width={780}
         extra={
           <Space>
-            <Button icon={<ReloadOutlined />} onClick={() => selectedKb && getDocuments(selectedKb.id).then(r => setDocs(r.data))}>刷新</Button>
-            <Upload beforeUpload={handleUpload} showUploadList={false}>
-              <Button type="primary" icon={<UploadOutlined />}>上传文档</Button>
+            <Button icon={<ReloadOutlined />} onClick={refreshDocs} size="small">刷新</Button>
+            <Upload beforeUpload={handleUpload} showUploadList={false} accept=".pdf,.docx,.txt,.md">
+              <Button type="primary" icon={<UploadOutlined />} size="small" style={{ borderRadius: 6 }}>上传</Button>
             </Upload>
           </Space>
         }
       >
-        <Table columns={docColumns} dataSource={docs} rowKey="id" size="small" pagination={false} />
+        <Table
+          columns={docColumns}
+          dataSource={docs}
+          rowKey="id"
+          size="small"
+          pagination={false}
+          locale={{
+            emptyText: (
+              <div className="empty-state" style={{ padding: '40px 20px' }}>
+                <FileOutlined className="empty-icon" />
+                <div className="empty-title">暂无文档</div>
+                <div className="empty-desc">上传 PDF、DOCX、TXT 或 MD 文件</div>
+              </div>
+            ),
+          }}
+        />
       </Drawer>
 
+      {/* Chunk drawer */}
       <Drawer
-        title={`分块详情 - ${selectedDoc?.original_filename || ''}`}
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <AppstoreOutlined style={{ color: '#e8653a' }} />
+            <span style={{ fontWeight: 600 }}>{selectedDoc?.original_filename}</span>
+            <span style={{ fontSize: 13, color: '#8a8580', fontWeight: 400 }}>
+              {chunks.length} 个分块
+            </span>
+          </div>
+        }
         open={chunkDrawerOpen}
         onClose={() => setChunkDrawerOpen(false)}
-        width={700}
+        width={640}
       >
         <List
           dataSource={chunks}
-          renderItem={(item: any, index: number) => (
-            <List.Item>
-              <List.Item.Meta
-                title={`分块 #${item.chunk_index + 1}`}
-                description={
-                  <div>
-                    <div style={{ whiteSpace: 'pre-wrap' }}>{item.chunk_text}</div>
-                    {item.parent_text && (
-                      <div style={{ marginTop: 8, padding: 8, background: '#f5f5f5', borderRadius: 4, fontSize: 12, color: '#666' }}>
-                        <strong>父级上下文：</strong>{item.parent_text.slice(0, 200)}...
-                      </div>
-                    )}
-                  </div>
-                }
-              />
+          renderItem={(item: any) => (
+            <List.Item style={{ borderBottom: '1px solid #f0eeeb', padding: '16px 0' }}>
+              <div style={{ width: '100%' }}>
+                <div style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  color: '#8a8580',
+                  marginBottom: 8,
+                }}>
+                  分块 #{item.chunk_index + 1}
+                </div>
+                <div style={{
+                  whiteSpace: 'pre-wrap',
+                  fontSize: 13,
+                  lineHeight: 1.7,
+                  color: '#1a1a1a',
+                }}>
+                  {item.chunk_text}
+                </div>
+                {item.parent_text && (
+                  <>
+                    <Divider style={{ margin: '12px 0' }} />
+                    <div style={{
+                      fontSize: 12,
+                      color: '#8a8580',
+                      lineHeight: 1.6,
+                      padding: '10px 12px',
+                      background: '#fafaf8',
+                      borderRadius: 8,
+                      border: '1px solid #f0eeeb',
+                    }}>
+                      <span style={{ fontWeight: 600, color: '#6b6560' }}>父级上下文</span>
+                      <div style={{ marginTop: 4 }}>{item.parent_text.slice(0, 200)}...</div>
+                    </div>
+                  </>
+                )}
+              </div>
             </List.Item>
           )}
         />
