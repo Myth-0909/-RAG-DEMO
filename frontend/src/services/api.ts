@@ -83,7 +83,7 @@ export const getChunks = (kbId: number, docId: number) =>
   api.get(`/knowledge/${kbId}/documents/${docId}/chunks`);
 
 // Chat
-export const chatQuery = (data: any) => api.post('/chat/query', data);
+export const chatQuery = (data: any) => api.post('/chat/query', data, { timeout: 120000 });
 
 export const chatStream = (data: any) =>
   api.post('/chat/stream', data, { responseType: 'stream' });
