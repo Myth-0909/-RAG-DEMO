@@ -86,6 +86,43 @@ actual_dim = len(response.data[0].embedding)
 
 配置文件中 `EMBEDDING_DIM` 必须与实际维度一致，否则 insert 时会报维度不匹配错误。
 
+### 维度不匹配时的自动重建
+
+当 embedding 模型更换或配置错误时，已存在的 collection 可能维度不匹配。插入时会报：
+
+```
+MilvusException: (code=1100, message=the dim (4096) of field data(embedding) is not equal to schema dim (1024): invalid parameter[expected=1024][actual=4096])
+```
+
+**修复**：在 `create_collection` 中添加维度验证和自动重建逻辑：
+
+```python
+def create_collection(self, name: str, dim: int = None):
+    dim = dim or settings.EMBEDDING_DIM
+    if utility.has_collection(name):
+        collection = Collection(name)
+        # Verify dim matches, drop and recreate if not
+        try:
+            schema = collection.schema
+            for field in schema.fields:
+                if field.dtype == 101:  # FLOAT_VECTOR
+                    existing_dim = field.params.get("dim", 0)
+                    if existing_dim != dim:
+                        self.drop_collection(name)
+                        break
+            else:
+                return collection
+        except Exception:
+            pass
+    
+    # ... 继续创建 collection
+```
+
+这个模式确保：
+1. 如果 collection 不存在，正常创建
+2. 如果存在且维度匹配，直接返回
+3. 如果存在但维度不匹配，删除并重建（会丢失数据，适用于开发环境）
+
 ## 批量插入模式
 
 ```python

@@ -104,14 +104,15 @@ class MilvusService:
         hits = []
         for hits_batch in results:
             for hit in hits_batch:
+                entity = hit.entity
                 hits.append({
                     "id": hit.id,
                     "score": hit.score,
-                    "chunk_text": hit.entity.get("chunk_text", ""),
-                    "parent_text": hit.entity.get("parent_text", ""),
-                    "metadata": hit.entity.get("metadata", {}),
-                    "document_id": hit.entity.get("document_id", 0),
-                    "chunk_index": hit.entity.get("chunk_index", 0),
+                    "chunk_text": entity.chunk_text if hasattr(entity, 'chunk_text') else "",
+                    "parent_text": entity.parent_text if hasattr(entity, 'parent_text') else "",
+                    "metadata": entity.metadata if hasattr(entity, 'metadata') else {},
+                    "document_id": entity.document_id if hasattr(entity, 'document_id') else 0,
+                    "chunk_index": entity.chunk_index if hasattr(entity, 'chunk_index') else 0,
                 })
         return hits
 
