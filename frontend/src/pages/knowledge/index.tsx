@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   Table, Button, Modal, Form, Input, Select, Space, Tag, Upload,
   message, Popconfirm, Drawer, List, Badge, Tooltip, Divider,
@@ -45,6 +45,8 @@ const KnowledgePage: React.FC = () => {
   const [chunks, setChunks] = useState<any[]>([]);
   const [selectedDoc, setSelectedDoc] = useState<any>(null);
 
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -57,6 +59,36 @@ const KnowledgePage: React.FC = () => {
   };
 
   useEffect(() => { fetchData(); }, []);
+
+  // Auto-polling: refresh doc list when any doc is pending/processing
+  const hasActiveProcessing = docs.some(
+    (d) => d.status === 'pending' || d.status === 'processing',
+  );
+
+  const refreshDocs = useCallback(async () => {
+    if (!selectedKb) return;
+    try {
+      const res = await getDocuments(selectedKb.id);
+      setDocs(res.data);
+      // Also refresh KB list for updated document_count
+      const kbRes = await getKnowledgeBases();
+      setKbs(kbRes.data);
+    } catch {
+      // silent
+    }
+  }, [selectedKb]);
+
+  useEffect(() => {
+    if (docDrawerOpen && hasActiveProcessing) {
+      pollRef.current = setInterval(refreshDocs, 3000);
+    }
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }, [docDrawerOpen, hasActiveProcessing, refreshDocs]);
 
   const handleCreate = async (values: any) => {
     try {
@@ -87,12 +119,6 @@ const KnowledgePage: React.FC = () => {
     setDocs(res.data);
   };
 
-  const refreshDocs = async () => {
-    if (!selectedKb) return;
-    const res = await getDocuments(selectedKb.id);
-    setDocs(res.data);
-  };
-
   const handleUpload = async (file: File) => {
     if (!selectedKb) return false;
     const formData = new FormData();
@@ -101,6 +127,7 @@ const KnowledgePage: React.FC = () => {
     try {
       await uploadDocument(selectedKb.id, formData);
       message.success('已上传，系统自动分析内容并分块');
+      // Refresh immediately to show pending status, then polling takes over
       refreshDocs();
     } catch {
       message.error('上传失败');
@@ -375,6 +402,24 @@ const KnowledgePage: React.FC = () => {
         width={780}
         extra={
           <Space>
+            {hasActiveProcessing && (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                fontSize: 12,
+                color: '#e8653a',
+              }}>
+                <span style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  background: '#e8653a',
+                  animation: 'pulse 1.5s infinite',
+                }} />
+                处理中，自动刷新...
+              </span>
+            )}
             <Button icon={<ReloadOutlined />} onClick={refreshDocs} size="small">刷新</Button>
             <Upload beforeUpload={handleUpload} showUploadList={false} accept=".pdf,.docx,.txt,.md">
               <Button type="primary" icon={<UploadOutlined />} size="small" style={{ borderRadius: 6 }}>上传</Button>

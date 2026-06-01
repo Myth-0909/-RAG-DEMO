@@ -21,7 +21,20 @@ class MilvusService:
     def create_collection(self, name: str, dim: int = None):
         dim = dim or settings.EMBEDDING_DIM
         if utility.has_collection(name):
-            return Collection(name)
+            collection = Collection(name)
+            # Verify dim matches, drop and recreate if not
+            try:
+                schema = collection.schema
+                for field in schema.fields:
+                    if field.dtype == 101:  # FLOAT_VECTOR
+                        existing_dim = field.params.get("dim", 0)
+                        if existing_dim != dim:
+                            self.drop_collection(name)
+                            break
+                else:
+                    return collection
+            except Exception:
+                pass
 
         fields = [
             FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
