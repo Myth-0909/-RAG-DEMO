@@ -45,7 +45,16 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == current_user.id).first()
-    return _user_to_response(user, db)
+    # 收集权限 code 列表
+    permissions = set()
+    for ur in user.roles:
+        if ur.role:
+            for perm in ur.role.permissions:
+                if perm.is_active:
+                    permissions.add(perm.code)
+    response = _user_to_response(user, db)
+    response.permissions = sorted(permissions)
+    return response
 
 
 @router.post("/users", response_model=UserResponse)

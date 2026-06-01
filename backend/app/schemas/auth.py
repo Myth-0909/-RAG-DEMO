@@ -35,6 +35,7 @@ class UserResponse(UserBase):
     is_superuser: bool
     created_at: Optional[datetime] = None
     roles: Optional[List["RoleBrief"]] = None
+    permissions: Optional[List[str]] = None
 
     class Config:
         from_attributes = True

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Layout, Menu, Avatar, Dropdown, Space, Typography } from 'antd';
 import {
@@ -18,29 +18,34 @@ import { removeToken, setUserInfo, getUserInfo } from '@/utils/auth';
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
 
-const menuItems = [
+// 所有菜单项及其所需权限
+const allMenuItems = [
   {
     key: '/knowledge',
     icon: <DatabaseOutlined />,
     label: '知识库',
+    permission: 'knowledge',
   },
   {
     key: '/chat',
     icon: <MessageOutlined />,
     label: '智能问答',
+    permission: 'chat',
   },
   {
     key: '/domain',
     icon: <GlobalOutlined />,
     label: '专业领域',
+    permission: 'domain',
   },
   {
     key: '/system',
     icon: <SettingOutlined />,
     label: '系统',
+    permission: 'system',
     children: [
-      { key: '/system/users', icon: <UserOutlined />, label: '用户管理' },
-      { key: '/system/roles', icon: <TeamOutlined />, label: '角色管理' },
+      { key: '/system/users', icon: <UserOutlined />, label: '用户管理', permission: 'system:user' },
+      { key: '/system/roles', icon: <TeamOutlined />, label: '角色管理', permission: 'system:role' },
     ],
   },
 ];
@@ -50,17 +55,40 @@ const AdminLayout: React.FC = () => {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
   const [userName, setUserName] = useState('管理员');
+  const [isSuperuser, setIsSuperuser] = useState(false);
+  const [permissions, setPermissions] = useState<string[]>([]);
 
   useEffect(() => {
     const info = getUserInfo();
     if (info) {
       setUserName(info.full_name || info.username);
+      setIsSuperuser(info.is_superuser || false);
+      setPermissions(info.permissions || []);
     }
     getMe().then((res) => {
       setUserName(res.data.full_name || res.data.username);
+      setIsSuperuser(res.data.is_superuser || false);
+      setPermissions(res.data.permissions || []);
       setUserInfo(res.data);
     }).catch(() => {});
   }, []);
+
+  // 根据权限过滤菜单
+  const filteredMenuItems = useMemo(() => {
+    const hasPermission = (perm: string) => isSuperuser || permissions.includes(perm);
+
+    return allMenuItems
+      .filter(item => hasPermission(item.permission))
+      .map(item => {
+        if (item.children) {
+          const filteredChildren = item.children.filter(child => hasPermission(child.permission));
+          if (filteredChildren.length === 0) return null;
+          return { ...item, children: filteredChildren };
+        }
+        return item;
+      })
+      .filter(Boolean);
+  }, [isSuperuser, permissions]);
 
   const handleLogout = () => {
     removeToken();
@@ -99,7 +127,7 @@ const AdminLayout: React.FC = () => {
           mode="inline"
           selectedKeys={[location.pathname]}
           defaultOpenKeys={collapsed ? [] : ['/system']}
-          items={menuItems}
+          items={filteredMenuItems}
           onClick={({ key }) => navigate(key)}
           style={{
             marginTop: 8,
