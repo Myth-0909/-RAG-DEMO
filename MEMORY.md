@@ -29,6 +29,28 @@
 
 ## 已实现功能
 
+### 智能内容分析与分块策略选择（2026-06-01）
+
+**核心重构：内容驱动的策略选择**
+- 新增 `hierarchy_score`：衡量标题层级深度，而非仅计算标题数量
+  - `#` > `##` > `###` = 真正的层级结构
+  - 全部 `##` = 扁平列表，不适合父子分块
+- 新增 `avg_section_chars`：确保章节有足够内容支撑父子分块
+- 降低标题/章节密度系数，防止评分膨胀
+- `parent_child` 现在需要：
+  - `heading_levels >= 2` AND
+  - `hierarchy_score >= 0.3` AND
+  - `avg_section_chars > 150`
+- 扁平文档（单层标题）正确降级为 `recursive`
+- DOCX 编号段落不再被误识别为章节标题
+
+**实际文档测试结果：**
+- RAG_01.md (H1+H2, 27标题): `parent_child` ✅
+- RAG_02.md (H1+H2, avg 69字符/节): `recursive` ✅
+- 公司规章制度表.docx (无MD标题): `recursive` ✅
+- 三层层级文档 (H1>H2>H3): `parent_child` ✅
+- 纯叙事文档: `semantic` ✅
+
 ### 多轮对话与长期记忆（2026-06-01）
 
 **后端实现：**
