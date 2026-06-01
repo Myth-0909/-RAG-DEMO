@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Input, Button, Select, Space, Typography, Spin, Tag, List, Popconfirm } from 'antd';
+import { Input, Button, Select, Space, Typography, Spin, Tag, List, Popconfirm, message } from 'antd';
 import {
   SendOutlined, MessageOutlined, BookOutlined,
   PlusOutlined, DeleteOutlined,
@@ -75,6 +75,9 @@ const ChatPage: React.FC = () => {
   const handleNewConversation = () => {
     setCurrentConversationId(null);
     setMessages([]);
+    setInput('');
+    message.success('已创建新对话');
+    setTimeout(() => inputRef.current?.focus(), 100);
   };
 
   const handleDeleteConversation = async (id: number) => {
