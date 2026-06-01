@@ -88,6 +88,18 @@ export const chatQuery = (data: any) => api.post('/chat/query', data, { timeout:
 export const chatStream = (data: any) =>
   api.post('/chat/stream', data, { responseType: 'stream' });
 
+// Conversations
+export const getConversations = () => api.get('/conversations/');
+
+export const createConversation = (data: { title: string; knowledge_base_ids: number[]; domain_id?: number }) =>
+  api.post('/conversations/', data);
+
+export const getConversation = (id: number) => api.get(`/conversations/${id}`);
+
+export const getConversationMessages = (id: number) => api.get(`/conversations/${id}/messages`);
+
+export const deleteConversation = (id: number) => api.delete(`/conversations/${id}`);
+
 // Domains
 export const getDomains = () => api.get('/domains/');
 

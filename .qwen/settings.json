@@ -10,7 +10,9 @@
       "Bash(python *)",
       "Bash(curl *)",
       "Bash(python3 *)",
-      "Bash(ls *)"
+      "Bash(ls *)",
+      "Bash(alembic *)",
+      "Bash(npm run *)"
     ]
   },
   "$version": 4

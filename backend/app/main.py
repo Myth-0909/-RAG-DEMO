@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 import app.models  # noqa: F401 — ensure all models loaded before mapper config
-from app.api.v1 import auth, roles, knowledge, chat, domains
+from app.api.v1 import auth, roles, knowledge, chat, domains, conversations
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -23,6 +23,7 @@ app.include_router(roles.router, prefix="/api/v1")
 app.include_router(knowledge.router, prefix="/api/v1")
 app.include_router(chat.router, prefix="/api/v1")
 app.include_router(domains.router, prefix="/api/v1")
+app.include_router(conversations.router, prefix="/api/v1")
 
 
 @app.get("/api/health")

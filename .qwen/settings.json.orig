@@ -9,7 +9,9 @@
       "Bash(uvicorn *)",
       "Bash(python *)",
       "Bash(curl *)",
-      "Bash(python3 *)"
+      "Bash(python3 *)",
+      "Bash(ls *)",
+      "Bash(alembic *)"
     ]
   },
   "$version": 4

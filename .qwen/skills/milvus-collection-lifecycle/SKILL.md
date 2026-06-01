@@ -159,6 +159,42 @@ def _ensure_connected(self):
         pass  # 已连接
 ```
 
+## pymilvus entity.get() API 兼容性陷阱
+
+**现象**：Search 返回结果后，使用 `hit.entity.get("field_name", default_value)` 访问字段时报错：
+
+```
+Hit.get() takes 2 positional arguments but 3 were given
+```
+
+**原因**：pymilvus 2.4.x 的 `entity.get()` 方法签名只接受 1 个参数（字段名），**不支持默认值参数**，与 Python dict.get() 的行为不同。
+
+**错误写法**：
+```python
+for hit in hits_batch:
+    hits.append({
+        "chunk_text": hit.entity.get("chunk_text", ""),  # ← 报错
+        "metadata": hit.entity.get("metadata", {}),      # ← 报错
+    })
+```
+
+**正确写法**：使用 `hasattr()` + 直接属性访问：
+
+```python
+for hit in hits_batch:
+    entity = hit.entity
+    hits.append({
+        "chunk_text": entity.chunk_text if hasattr(entity, 'chunk_text') else "",
+        "metadata": entity.metadata if hasattr(entity, 'metadata') else {},
+        "document_id": entity.document_id if hasattr(entity, 'document_id') else 0,
+    })
+```
+
+**关键点**：
+- pymilvus 的 Entity 对象不是 dict，`get()` 方法不支持默认值
+- 必须使用 `hasattr()` 检查字段是否存在
+- 使用直接属性访问 `entity.field_name` 而非 `entity["field_name"]`
+
 ## 安全删除 Collection
 
 ```python

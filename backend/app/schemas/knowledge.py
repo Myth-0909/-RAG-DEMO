@@ -103,6 +103,7 @@ class DomainResponse(BaseModel):
 class ChatRequest(BaseModel):
     question: str
     knowledge_base_ids: List[int]
+    conversation_id: Optional[int] = None
     domain_id: Optional[int] = None
     top_k: int = 5
 
