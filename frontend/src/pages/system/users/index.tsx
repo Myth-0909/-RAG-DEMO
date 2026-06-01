@@ -84,12 +84,6 @@ const UserPage: React.FC = () => {
       ),
     },
     {
-      title: '邮箱',
-      dataIndex: 'email',
-      key: 'email',
-      render: (v: string) => <span style={{ color: '#6b6560', fontSize: 13 }}>{v || '—'}</span>,
-    },
-    {
       title: '角色',
       key: 'roles',
       render: (_: any, record: any) => (
@@ -187,14 +181,9 @@ const UserPage: React.FC = () => {
               <Input.Password placeholder="至少 6 位" style={{ borderRadius: 8 }} />
             </Form.Item>
           )}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <Form.Item name="full_name" label="姓名">
-              <Input placeholder="显示名称" style={{ borderRadius: 8 }} />
-            </Form.Item>
-            <Form.Item name="email" label="邮箱">
-              <Input placeholder="email" style={{ borderRadius: 8 }} />
-            </Form.Item>
-          </div>
+          <Form.Item name="full_name" label="姓名">
+            <Input placeholder="显示名称" style={{ borderRadius: 8 }} />
+          </Form.Item>
           <Form.Item name="role_ids" label="角色">
             <Select
               mode="multiple"

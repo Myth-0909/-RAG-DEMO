@@ -75,7 +75,6 @@ def seed():
         # Create admin user
         admin_user = User(
             username="admin",
-            email="admin@example.com",
             full_name="系统管理员",
             hashed_password=get_password_hash("admin123"),
             is_superuser=True,

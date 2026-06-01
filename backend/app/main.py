@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
+import app.models  # noqa: F401 — ensure all models loaded before mapper config
 from app.api.v1 import auth, roles, knowledge, chat, domains
 
 app = FastAPI(
