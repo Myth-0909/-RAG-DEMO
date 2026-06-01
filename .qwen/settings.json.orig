@@ -3,7 +3,11 @@
     "allow": [
       "Skill(redesign-existing-projects)",
       "Bash(npx *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(source *)",
+      "Bash(uvicorn *)",
+      "Bash(python *)"
     ]
   },
   "$version": 4

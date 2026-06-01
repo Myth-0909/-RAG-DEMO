@@ -4,7 +4,11 @@
       "Skill(redesign-existing-projects)",
       "Bash(npx *)",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(source *)",
+      "Bash(uvicorn *)",
+      "Bash(python *)",
+      "Bash(curl *)"
     ]
   },
   "$version": 4
