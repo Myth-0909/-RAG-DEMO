@@ -11,7 +11,9 @@
       "Bash(curl *)",
       "Bash(python3 *)",
       "Bash(ls *)",
-      "Bash(alembic *)"
+      "Bash(alembic *)",
+      "Bash(npm run *)",
+      "Bash(git remote *)"
     ]
   },
   "$version": 4

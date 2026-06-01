@@ -1,11 +1,16 @@
 """
 Intelligent content analyzer for automatic cleaning and chunking strategy selection.
 
-Analyzes document content characteristics and recommends the optimal chunking strategy:
-- parent_child: Structured documents with clear sections/headings
-- semantic: Narrative/dense text with topic flow
-- recursive: Short or simple documents
-- hybrid: Mixed content with both structured and narrative sections
+Design principle: analyze content FIRST, then let data drive the decision.
+- Measure heading hierarchy depth (not just count)
+- Measure content per section (short sections don't need parent-child)
+- Distinguish flat structure (many same-level headings) from nested hierarchy
+
+Strategies:
+- recursive: Default for most documents, especially flat/short ones
+- parent_child: Only for documents with true multi-level heading hierarchy
+- semantic: For narrative-heavy text with topic flow
+- hybrid: For documents mixing structured and narrative sections
 """
 
 import re
@@ -20,153 +25,158 @@ class ContentProfile:
     total_sentences: int
     total_paragraphs: int
     heading_count: int
+    heading_levels: int        # number of distinct heading levels (e.g. #, ##, ### = 3)
     section_count: int
+    avg_section_chars: float    # average content length per section
     list_count: int
     table_count: int
     code_block_count: int
     avg_sentence_length: float
     avg_paragraph_length: float
-    structure_score: float  # 0-1: how structured the document is
-    narrative_score: float  # 0-1: how narrative/flowing the text is
-    density_score: float    # 0-1: information density
+    structure_score: float
+    narrative_score: float
+    density_score: float
+    hierarchy_score: float     # 0-1: how deeply nested the heading hierarchy is
     recommended_strategy: str
     reasoning: str
 
 
-# Regex patterns for content analysis
-HEADING_PATTERNS = [
-    re.compile(r'^#{1,6}\s+.+', re.MULTILINE),           # Markdown headings
-    re.compile(r'^[一二三四五六七八九十]+[、.]\s*.+', re.MULTILINE),  # Chinese numbered sections
-    re.compile(r'^第[一二三四五六七八九十\d]+[章节部分]', re.MULTILINE),  # Chapter markers
-    re.compile(r'^\d+\.\d*\s+[A-Z\u4e00-\u9fff]', re.MULTILINE),  # Numbered sections
-    re.compile(r'^[A-Z][A-Z\s]{3,}$', re.MULTILINE),      # ALL CAPS headings
+# === Markdown heading detection ===
+MD_HEADING_RE = re.compile(r'^(#{1,6})\s+(.+)', re.MULTILINE)
+
+# === Structural heading patterns (NOT just numbered paragraphs) ===
+# Only count as headings if they look like actual section titles
+STRUCTURED_HEADING_PATTERNS = [
+    MD_HEADING_RE,                                                    # Markdown # headings
+    re.compile(r'^第[一二三四五六七八九十\d]+[章节部分]\s*.+', re.MULTILINE),  # 第一章 / 第1节
+    re.compile(r'^[一二三四五六七八九十]+[、]\s*.{2,}', re.MULTILINE),  # 一、标题（至少2字内容）
 ]
 
+# === List detection ===
 LIST_PATTERNS = [
-    re.compile(r'^[\s]*[-*•]\s+.+', re.MULTILINE),        # Bullet lists
-    re.compile(r'^[\s]*\d+[.)]\s+.+', re.MULTILINE),      # Numbered lists
-    re.compile(r'^[\s]*[a-zA-Z][.)]\s+.+', re.MULTILINE), # Lettered lists
+    re.compile(r'^[\s]*[-*•]\s+.+', re.MULTILINE),
+    re.compile(r'^[\s]*\d+[.)]\s+.+', re.MULTILINE),
+    re.compile(r'^[\s]*[a-zA-Z][.)]\s+.+', re.MULTILINE),
 ]
 
 TABLE_PATTERN = re.compile(r'\|.*\|.*\|', re.MULTILINE)
-CODE_BLOCK_PATTERN = re.compile(r'```[\s\S]*?```|`[^`]+`')
-URL_PATTERN = re.compile(r'https?://\S+')
-EMAIL_PATTERN = re.compile(r'\S+@\S+\.\S+')
+CODE_BLOCK_PATTERN = re.compile(r'```[\s\S]*?```')
 
 
 def clean_content(text: str, file_type: str = "") -> Tuple[str, Dict[str, Any]]:
-    """
-    Clean document content while preserving original meaning.
-
-    Returns:
-        Tuple of (cleaned_text, cleaning_report)
-    """
+    """Clean document content while preserving original meaning."""
     original_length = len(text)
-    cleaning_report = {
+    report = {
         "whitespace_normalized": 0,
         "encoding_fixed": 0,
         "artifacts_removed": 0,
         "original_chars": original_length,
     }
 
-    # Fix common encoding issues
     replacements = {
-        "\u00a0": " ",       # Non-breaking space
-        "\u200b": "",        # Zero-width space
-        "\u200c": "",        # Zero-width non-joiner
-        "\u200d": "",        # Zero-width joiner
-        "\ufeff": "",        # BOM
-        "\u2028": "\n",      # Line separator
-        "\u2029": "\n\n",    # Paragraph separator
-        "\r\n": "\n",        # Windows line endings
-        "\r": "\n",          # Old Mac line endings
-        "\t": "    ",        # Tabs to spaces
+        "\u00a0": " ", "\u200b": "", "\u200c": "", "\u200d": "",
+        "\ufeff": "", "\u2028": "\n", "\u2029": "\n\n",
+        "\r\n": "\n", "\r": "\n", "\t": "    ",
     }
-
     for old, new in replacements.items():
         count = text.count(old)
         if count > 0:
             text = text.replace(old, new)
-            cleaning_report["encoding_fixed"] += count
+            report["encoding_fixed"] += count
 
-    # Normalize excessive whitespace
-    text, ws_count = re.subn(r'[ \t]+', ' ', text)
-    cleaning_report["whitespace_normalized"] += ws_count
+    text, n = re.subn(r'[ \t]+', ' ', text)
+    report["whitespace_normalized"] += n
+    text, n = re.subn(r'\n{4,}', '\n\n\n', text)
+    report["whitespace_normalized"] += n
 
-    # Normalize excessive blank lines (keep max 2)
-    text, blank_count = re.subn(r'\n{4,}', '\n\n\n', text)
-    cleaning_report["whitespace_normalized"] += blank_count
-
-    # Remove PDF artifacts
     if file_type == "pdf":
-        # Remove page numbers at line boundaries
-        text, page_count = re.subn(r'\n\s*\d+\s*\n', '\n', text)
-        cleaning_report["artifacts_removed"] += page_count
+        text, n = re.subn(r'\n\s*\d+\s*\n', '\n', text)
+        report["artifacts_removed"] += n
+        text, n = re.subn(r'(?:第\s*\d+\s*页\s*共\s*\d+\s*页|Page\s*\d+\s*of\s*\d+)', '', text, flags=re.IGNORECASE)
+        report["artifacts_removed"] += n
+        text, n = re.subn(r'(\w+)-\n\s*(\w+)', r'\1\2', text)
+        report["artifacts_removed"] += n
 
-        # Remove "Page X of Y" patterns
-        text, page_count2 = re.subn(r'(?:第\s*\d+\s*页\s*共\s*\d+\s*页|Page\s*\d+\s*of\s*\d+)', '', text, flags=re.IGNORECASE)
-        cleaning_report["artifacts_removed"] += page_count2
-
-        # Fix hyphenated words split across lines
-        text, hyphen_count = re.subn(r'(\w+)-\n\s*(\w+)', r'\1\2', text)
-        cleaning_report["artifacts_removed"] += hyphen_count
-
-    # Remove trailing whitespace per line
     text = re.sub(r'[ \t]+$', '', text, flags=re.MULTILINE)
-
-    # Strip leading/trailing whitespace
     text = text.strip()
 
-    cleaning_report["cleaned_chars"] = len(text)
-    cleaning_report["chars_removed"] = original_length - len(text)
-
-    return text, cleaning_report
+    report["cleaned_chars"] = len(text)
+    report["chars_removed"] = original_length - len(text)
+    return text, report
 
 
 def analyze_content(text: str, file_type: str = "") -> ContentProfile:
     """
     Analyze document content to determine optimal chunking strategy.
+
+    Approach: measure actual content characteristics first, then decide.
     """
     if not text.strip():
         return ContentProfile(
             total_chars=0, total_sentences=0, total_paragraphs=0,
-            heading_count=0, section_count=0, list_count=0, table_count=0,
+            heading_count=0, heading_levels=0, section_count=0,
+            avg_section_chars=0, list_count=0, table_count=0,
             code_block_count=0, avg_sentence_length=0, avg_paragraph_length=0,
             structure_score=0, narrative_score=0, density_score=0,
+            hierarchy_score=0,
             recommended_strategy="recursive", reasoning="空文档，使用默认策略",
         )
 
-    # Basic metrics
     total_chars = len(text)
 
-    # Sentences (Chinese + English)
-    sentence_endings = re.compile(r'[。！？.!?\n]+')
-    sentences = [s.strip() for s in sentence_endings.split(text) if s.strip()]
+    # --- Sentences ---
+    sentences = [s.strip() for s in re.split(r'[。！？.!?\n]+', text) if s.strip()]
     total_sentences = max(len(sentences), 1)
-    avg_sentence_length = total_chars / total_sentences if total_sentences > 0 else 0
+    avg_sentence_length = total_chars / total_sentences
 
-    # Paragraphs
+    # --- Paragraphs ---
     paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
     total_paragraphs = max(len(paragraphs), 1)
     avg_paragraph_length = sum(len(p) for p in paragraphs) / total_paragraphs
 
-    # Structural elements
-    heading_count = sum(len(p.findall(text)) for p in HEADING_PATTERNS)
+    # --- Heading analysis (the key improvement) ---
+    md_headings = MD_HEADING_RE.findall(text)  # [(level_str, title), ...]
+    heading_count = len(md_headings)
+
+    # Extract heading levels for hierarchy analysis
+    if md_headings:
+        levels = set(len(h[0]) for h in md_headings)  # e.g. {1, 2, 3}
+        heading_levels = len(levels)
+        max_level = max(levels)
+        min_level = min(levels)
+        level_span = max_level - min_level
+    else:
+        heading_levels = 0
+        level_span = 0
+
+    # Count non-markdown structural headings
+    non_md_headings = 0
+    for pat in STRUCTURED_HEADING_PATTERNS[1:]:  # skip MD_HEADING_RE
+        non_md_headings += len(pat.findall(text))
+    heading_count += non_md_headings
+
+    # --- Section splitting (for measuring content per section) ---
+    section_splits = re.split(
+        r'(?:^#{1,6}\s+.+|^第[一二三四五六七八九十\d]+[章节部分]\s*.+|^[一二三四五六七八九十]+[、]\s*.+)',
+        text, flags=re.MULTILINE
+    )
+    section_bodies = [s.strip() for s in section_splits if s.strip()]
+    section_count = max(len(section_bodies), 1)
+    avg_section_chars = total_chars / section_count
+
+    # --- Other structural elements ---
     list_count = sum(len(p.findall(text)) for p in LIST_PATTERNS)
     table_count = len(TABLE_PATTERN.findall(text))
     code_block_count = len(CODE_BLOCK_PATTERN.findall(text))
 
-    # Section detection (consecutive headings or clear section breaks)
-    section_markers = re.findall(
-        r'(?:^#{1,3}\s|^[一二三四五六七八九十]+[、.]|^第[一二三四五六七八九十\d]+[章节])',
-        text, re.MULTILINE
+    # --- Calculate scores ---
+    hierarchy_score = _calculate_hierarchy_score(
+        heading_levels, level_span, heading_count, total_paragraphs,
     )
-    section_count = len(section_markers)
 
-    # Calculate scores
     structure_score = _calculate_structure_score(
         total_chars, heading_count, section_count, list_count,
-        table_count, code_block_count, total_paragraphs,
+        table_count, code_block_count, total_paragraphs, hierarchy_score,
     )
 
     narrative_score = _calculate_narrative_score(
@@ -179,17 +189,20 @@ def analyze_content(text: str, file_type: str = "") -> ContentProfile:
         heading_count, list_count,
     )
 
-    # Determine strategy
+    # --- Determine strategy based on content ---
     strategy, reasoning = _recommend_strategy(
         total_chars=total_chars,
         structure_score=structure_score,
         narrative_score=narrative_score,
         density_score=density_score,
+        hierarchy_score=hierarchy_score,
         heading_count=heading_count,
+        heading_levels=heading_levels,
         section_count=section_count,
+        avg_section_chars=avg_section_chars,
         total_paragraphs=total_paragraphs,
         avg_paragraph_length=avg_paragraph_length,
-        file_type=file_type,
+        table_count=table_count,
     )
 
     return ContentProfile(
@@ -197,7 +210,9 @@ def analyze_content(text: str, file_type: str = "") -> ContentProfile:
         total_sentences=total_sentences,
         total_paragraphs=total_paragraphs,
         heading_count=heading_count,
+        heading_levels=heading_levels,
         section_count=section_count,
+        avg_section_chars=round(avg_section_chars, 1),
         list_count=list_count,
         table_count=table_count,
         code_block_count=code_block_count,
@@ -206,44 +221,87 @@ def analyze_content(text: str, file_type: str = "") -> ContentProfile:
         structure_score=round(structure_score, 3),
         narrative_score=round(narrative_score, 3),
         density_score=round(density_score, 3),
+        hierarchy_score=round(hierarchy_score, 3),
         recommended_strategy=strategy,
         reasoning=reasoning,
     )
 
 
+def _calculate_hierarchy_score(
+    heading_levels: int,
+    level_span: int,
+    heading_count: int,
+    total_paragraphs: int,
+) -> float:
+    """
+    Score 0-1: how deeply nested the heading hierarchy is.
+
+    This is the KEY differentiator:
+    - Flat documents (all ##) → low score → recursive
+    - Hierarchical documents (# > ## > ###) → high score → parent_child
+    """
+    if heading_count == 0:
+        return 0.0
+
+    score = 0.0
+
+    # Multiple heading levels = true hierarchy
+    if heading_levels >= 3:
+        score += 0.5
+    elif heading_levels == 2:
+        score += 0.3
+    else:
+        # Single level = flat, even with many headings
+        score += 0.05
+
+    # Level span (difference between deepest and shallowest)
+    if level_span >= 2:
+        score += 0.25
+    elif level_span == 1:
+        score += 0.1
+
+    # Headings that actually organize content (not just labels)
+    if total_paragraphs > 0:
+        heading_ratio = heading_count / total_paragraphs
+        if 0.05 < heading_ratio < 0.5:
+            score += 0.15
+        elif heading_ratio >= 0.5:
+            # Too many headings relative to content = flat list, not hierarchy
+            score += 0.05
+
+    return min(score, 1.0)
+
+
 def _calculate_structure_score(
     total_chars: int, heading_count: int, section_count: int,
     list_count: int, table_count: int, code_block_count: int,
-    total_paragraphs: int,
+    total_paragraphs: int, hierarchy_score: float,
 ) -> float:
     """Score 0-1: how structured/organized the document is."""
     score = 0.0
 
-    # Headings per 1000 chars
+    # Heading density (capped lower to avoid inflation)
     heading_density = heading_count / max(total_chars / 1000, 1)
-    score += min(heading_density * 0.15, 0.3)
+    score += min(heading_density * 0.08, 0.15)
 
-    # Sections
+    # Section density (capped lower)
     section_density = section_count / max(total_chars / 1000, 1)
-    score += min(section_density * 0.12, 0.25)
+    score += min(section_density * 0.06, 0.12)
 
     # Lists
     list_density = list_count / max(total_paragraphs, 1)
-    score += min(list_density * 0.1, 0.2)
+    score += min(list_density * 0.08, 0.15)
 
     # Tables
     if table_count > 0:
-        score += min(table_count * 0.08, 0.15)
+        score += min(table_count * 0.06, 0.12)
 
     # Code blocks
     if code_block_count > 0:
         score += min(code_block_count * 0.05, 0.1)
 
-    # Paragraph count (more paragraphs = more structure)
-    if total_paragraphs > 10:
-        score += 0.05
-    elif total_paragraphs > 20:
-        score += 0.1
+    # Boost from actual hierarchy (not just heading count)
+    score += hierarchy_score * 0.2
 
     return min(score, 1.0)
 
@@ -256,7 +314,6 @@ def _calculate_narrative_score(
     """Score 0-1: how much the text flows as continuous narrative."""
     score = 0.0
 
-    # Long sentences suggest narrative flow
     if avg_sentence_length > 30:
         score += 0.2
     elif avg_sentence_length > 20:
@@ -264,7 +321,6 @@ def _calculate_narrative_score(
     elif avg_sentence_length > 10:
         score += 0.1
 
-    # Long paragraphs suggest narrative
     if avg_paragraph_length > 300:
         score += 0.25
     elif avg_paragraph_length > 150:
@@ -272,7 +328,6 @@ def _calculate_narrative_score(
     elif avg_paragraph_length > 80:
         score += 0.1
 
-    # Few headings relative to paragraphs = narrative
     if total_paragraphs > 0:
         heading_ratio = heading_count / total_paragraphs
         if heading_ratio < 0.1:
@@ -280,7 +335,6 @@ def _calculate_narrative_score(
         elif heading_ratio < 0.2:
             score += 0.15
 
-    # Many sentences relative to paragraphs
     if total_paragraphs > 0:
         sentences_per_para = total_sentences / total_paragraphs
         if sentences_per_para > 5:
@@ -288,7 +342,6 @@ def _calculate_narrative_score(
         elif sentences_per_para > 3:
             score += 0.1
 
-    # Inverse relationship with structure
     score += max(0, 0.15 - structure_score * 0.15)
 
     return min(score, 1.0)
@@ -301,25 +354,22 @@ def _calculate_density_score(
     """Score 0-1: information density (mixed content types)."""
     score = 0.0
 
-    # Mix of content types
     content_types = sum([
         heading_count > 0,
         list_count > 0,
         total_paragraphs > 3,
         total_sentences > total_paragraphs * 2,
     ])
-    score += content_types * 0.15
+    score += content_types * 0.12
 
-    # Moderate paragraph lengths (not too long, not too short)
     avg_para = total_chars / max(total_paragraphs, 1)
     if 50 < avg_para < 200:
-        score += 0.2
+        score += 0.15
 
-    # Ratio of sentences to paragraphs
     if total_paragraphs > 0:
         ratio = total_sentences / total_paragraphs
         if 2 < ratio < 6:
-            score += 0.2
+            score += 0.15
 
     return min(score, 1.0)
 
@@ -329,62 +379,82 @@ def _recommend_strategy(
     structure_score: float,
     narrative_score: float,
     density_score: float,
+    hierarchy_score: float,
     heading_count: int,
+    heading_levels: int,
     section_count: int,
+    avg_section_chars: float,
     total_paragraphs: int,
     avg_paragraph_length: float,
-    file_type: str,
+    table_count: int,
 ) -> Tuple[str, str]:
     """
-    Recommend chunking strategy based on content profile.
+    Recommend chunking strategy based on content analysis.
 
-    Returns:
-        Tuple of (strategy_name, reasoning_text)
+    Decision logic:
+    1. Check document size (short → recursive)
+    2. Check hierarchy depth (parent_child needs true multi-level headings)
+    3. Check narrative flow (semantic for flowing text)
+    4. Check content mix (hybrid for mixed types)
+    5. Default to recursive
     """
-    # Very short documents: simple recursive chunking
+    # --- Short documents: always recursive ---
     if total_chars < 1000:
-        return "recursive", "文档较短，使用递归字符分块即可保证完整性"
-
-    # High structure: parent-child chunking preserves hierarchy
-    if structure_score >= 0.5 and heading_count >= 3:
-        return "parent_child", (
-            f"检测到 {heading_count} 个标题和 {section_count} 个章节，"
-            f"文档结构清晰（结构评分 {structure_score:.2f}），"
-            f"使用父子分块保留层级上下文"
+        return "recursive", (
+            f"文档较短（{total_chars} 字符），递归分块即可保证完整性"
         )
 
-    # High narrative: semantic chunking groups by meaning
-    if narrative_score >= 0.5 and structure_score < 0.3:
+    # --- Parent-child: requires TRUE hierarchy ---
+    # Must have: multiple heading levels AND sections with enough content
+    has_hierarchy = heading_levels >= 2 and hierarchy_score >= 0.3
+    has_substantial_sections = avg_section_chars > 150
+
+    if has_hierarchy and has_substantial_sections:
+        return "parent_child", (
+            f"文档具有 {heading_levels} 层标题层级（{heading_count} 个标题），"
+            f"平均章节 {avg_section_chars:.0f} 字符，"
+            f"层级评分 {hierarchy_score:.2f}，使用父子分块保留层级上下文"
+        )
+
+    # --- Semantic: narrative-heavy documents ---
+    if narrative_score >= 0.45 and hierarchy_score < 0.2:
         return "semantic", (
-            f"文档以叙述为主（叙事评分 {narrative_score:.2f}，结构评分 {structure_score:.2f}），"
+            f"文档以叙述为主（叙事评分 {narrative_score:.2f}，层级评分 {hierarchy_score:.2f}），"
             f"使用语义分块按主题相关性聚合内容"
         )
 
-    # Mixed content: hybrid strategy
-    if density_score >= 0.4 and structure_score >= 0.2:
+    # --- Hybrid: mixed structured + narrative content ---
+    # Needs both structural elements AND narrative flow
+    has_mixed = (
+        density_score >= 0.35
+        and structure_score >= 0.15
+        and narrative_score >= 0.25
+    )
+    if has_mixed and total_chars > 3000:
         return "hybrid", (
-            f"文档内容混合（密度评分 {density_score:.2f}，结构评分 {structure_score:.2f}），"
-            f"使用混合分块：结构化部分用父子分块，叙述部分用语义分块"
+            f"文档内容混合（密度 {density_score:.2f}，结构 {structure_score:.2f}，"
+            f"叙事 {narrative_score:.2f}），使用混合分块"
         )
 
-    # Long documents with moderate structure
-    if total_chars > 5000 and structure_score >= 0.25:
-        return "parent_child", (
-            f"文档较长（{total_chars} 字符）且有一定结构（{heading_count} 个标题），"
-            f"使用父子分块兼顾上下文和检索精度"
+    # --- Long documents with tables ---
+    if table_count > 0 and total_chars > 3000:
+        return "hybrid", (
+            f"文档包含 {table_count} 个表格（{total_chars} 字符），"
+            f"使用混合分块分别处理表格和正文"
         )
 
-    # Long narrative documents
-    if total_chars > 5000 and narrative_score >= 0.35:
-        return "semantic", (
-            f"文档较长（{total_chars} 字符）且以叙述为主，"
-            f"使用语义分块保持主题连贯性"
+    # --- Default: recursive ---
+    # This is the correct choice for flat documents with same-level headings
+    if heading_count > 0 and heading_levels <= 1:
+        return "recursive", (
+            f"文档有 {heading_count} 个标题但仅 {heading_levels} 层（扁平结构），"
+            f"无需父子分块，使用递归字符分块"
         )
 
-    # Default: recursive
     return "recursive", (
-        f"文档特征不明显（结构 {structure_score:.2f}，叙事 {narrative_score:.2f}，"
-        f"密度 {density_score:.2f}），使用通用递归分块"
+        f"文档特征：{total_chars} 字符，{heading_count} 标题/"
+        f"{heading_levels} 层，叙事 {narrative_score:.2f}，"
+        f"使用通用递归分块"
     )
 
 
@@ -404,7 +474,9 @@ def get_analysis_summary(profile: ContentProfile) -> Dict[str, Any]:
             "total_sentences": profile.total_sentences,
             "total_paragraphs": profile.total_paragraphs,
             "headings": profile.heading_count,
+            "heading_levels": profile.heading_levels,
             "sections": profile.section_count,
+            "avg_section_chars": profile.avg_section_chars,
             "lists": profile.list_count,
             "tables": profile.table_count,
             "code_blocks": profile.code_block_count,
@@ -415,6 +487,7 @@ def get_analysis_summary(profile: ContentProfile) -> Dict[str, Any]:
             "structure": profile.structure_score,
             "narrative": profile.narrative_score,
             "density": profile.density_score,
+            "hierarchy": profile.hierarchy_score,
         },
         "strategy": {
             "selected": profile.recommended_strategy,
