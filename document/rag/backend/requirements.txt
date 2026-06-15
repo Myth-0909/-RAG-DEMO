@@ -1,0 +1,42 @@
+# Web Framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.18
+
+# Database
+sqlalchemy==2.0.36
+alembic==1.14.0
+aiosqlite==0.20.0
+
+# Auth & Security
+python-jose[cryptography]==3.3.0
+bcrypt
+
+# Pydantic
+pydantic==2.10.3
+pydantic-settings==2.7.0
+
+# Milvus
+pymilvus==2.4.9
+
+# LLM & Embedding (OpenAI-compatible API)
+openai==1.58.1
+langchain==0.3.13
+langchain-community==0.3.13
+langchain-openai==0.2.14
+langchain-text-splitters==0.3.4
+
+# Document Processing
+pypdf==5.1.0
+python-docx==1.1.2
+pdfplumber==0.11.4
+pytesseract==0.3.13
+Pillow==11.1.0
+
+# SSE Streaming
+sse-starlette==2.2.1
+
+# Utils
+python-dotenv==1.0.1
+httpx==0.28.1
+setuptools<81

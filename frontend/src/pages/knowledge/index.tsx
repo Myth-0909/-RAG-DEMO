@@ -12,15 +12,18 @@ import {
   getKnowledgeBases, createKnowledgeBase, deleteKnowledgeBase,
   getDocuments, uploadDocument, deleteDocument, getChunks, getDomains,
 } from '@/services/api';
+import { getUserInfo } from '@/utils/auth';
+import AnalysisDialog from '@/components/AnalysisDialog';
+import ConvertedTextViewer from '@/components/ConvertedTextViewer';
 
 const { TextArea } = Input;
 
 const strategyLabels: Record<string, { label: string; color: string }> = {
-  recursive: { label: '递归分块', color: '#5b8ec9' },
-  fixed: { label: '固定分块', color: '#8a8580' },
-  parent_child: { label: '父子分块', color: '#e8653a' },
-  semantic: { label: '语义分块', color: '#4a9e6e' },
-  hybrid: { label: '混合分块', color: '#9b59b6' },
+  recursive: { label: '递归分块', color: '#3f6f8f' },
+  fixed: { label: '固定分块', color: '#7d8a96' },
+  parent_child: { label: '父子分块', color: '#3f6f8f' },
+  semantic: { label: '语义分块', color: '#547b63' },
+  hybrid: { label: '混合分块', color: '#7a678c' },
 };
 
 const statusConfig: Record<string, { color: string; text: string }> = {
@@ -47,6 +50,14 @@ const KnowledgePage: React.FC = () => {
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Analysis dialog state (for viewing past results)
+  const [analysisDialogOpen, setAnalysisDialogOpen] = useState(false);
+  const [analysisDoc, setAnalysisDoc] = useState<any>(null);
+  const [convertedViewerOpen, setConvertedViewerOpen] = useState(false);
+  const [convertedDoc, setConvertedDoc] = useState<any>(null);
+  const processedDocIdsRef = useRef<Set<number>>(new Set());
+
+
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -69,7 +80,22 @@ const KnowledgePage: React.FC = () => {
     if (!selectedKb) return;
     try {
       const res = await getDocuments(selectedKb.id);
-      setDocs(res.data);
+      const newDocs = res.data;
+      setDocs(newDocs);
+
+      // Detect newly completed documents and show analysis dialog
+      for (const doc of newDocs) {
+        if (doc.status === 'completed' && !processedDocIdsRef.current.has(doc.id)) {
+          processedDocIdsRef.current.add(doc.id);
+          // Only show dialog for docs that have analysis data (just finished processing)
+          if (doc.metadata_json?.strategy) {
+            setAnalysisDoc(doc);
+            setAnalysisDialogOpen(true);
+            break; // Show one at a time
+          }
+        }
+      }
+
       // Also refresh KB list for updated document_count
       const kbRes = await getKnowledgeBases();
       setKbs(kbRes.data);
@@ -117,17 +143,23 @@ const KnowledgePage: React.FC = () => {
     setDocDrawerOpen(true);
     const res = await getDocuments(kb.id);
     setDocs(res.data);
+    // Mark existing completed docs so dialog only shows for newly processed ones
+    for (const doc of res.data) {
+      if (doc.status === 'completed') {
+        processedDocIdsRef.current.add(doc.id);
+      }
+    }
   };
 
   const handleUpload = async (file: File) => {
     if (!selectedKb) return false;
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('metadata_json', JSON.stringify({ author: 'admin' }));
+    const userInfo = getUserInfo();
+    formData.append('metadata_json', JSON.stringify({ author: userInfo?.username || 'unknown' }));
     try {
       await uploadDocument(selectedKb.id, formData);
-      message.success('已上传，系统自动分析内容并分块');
-      // Refresh immediately to show pending status, then polling takes over
+      message.success('已上传，系统正在后台自动分析...');
       refreshDocs();
     } catch {
       message.error('上传失败');
@@ -141,8 +173,10 @@ const KnowledgePage: React.FC = () => {
       await deleteDocument(selectedKb.id, docId);
       message.success('已删除');
       refreshDocs();
-    } catch {
-      message.error('删除失败');
+    } catch (err: any) {
+      console.error('删除文档失败', err);
+      const detail = err?.response?.data?.detail;
+      message.error(detail || '删除失败');
     }
   };
 
@@ -174,14 +208,14 @@ const KnowledgePage: React.FC = () => {
       render: (name: string, record: any) => (
         <a
           onClick={() => openDocs(record)}
-          style={{ fontWeight: 500, color: '#1a1a1a' }}
+          style={{ fontWeight: 500, color: '#202a34' }}
         >
           {name}
         </a>
       ),
     },
     { title: '描述', dataIndex: 'description', key: 'description', ellipsis: true,
-      render: (v: string) => <span style={{ color: '#8a8580' }}>{v || '—'}</span>,
+      render: (v: string) => <span style={{ color: '#7d8a96' }}>{v || '—'}</span>,
     },
     {
       title: '文档',
@@ -202,7 +236,7 @@ const KnowledgePage: React.FC = () => {
           width: 8,
           height: 8,
           borderRadius: '50%',
-          background: v ? '#4a9e6e' : '#c4c0ba',
+          background: v ? '#547b63' : '#b3bec8',
           display: 'inline-block',
         }} />
       ),
@@ -219,11 +253,11 @@ const KnowledgePage: React.FC = () => {
               size="small"
               icon={<FileTextOutlined />}
               onClick={() => openDocs(record)}
-              style={{ color: '#6b6560' }}
+              className="action-icon-button"
             />
           </Tooltip>
-          <Popconfirm title="确认删除此知识库?" onConfirm={() => handleDelete(record.id)} okText="删除" cancelText="取消">
-            <Button type="text" size="small" icon={<DeleteOutlined />} style={{ color: '#c4c0ba' }} />
+          <Popconfirm title="确认删除此知识库?" onConfirm={() => handleDelete(record.id)} okText="删除" cancelText="取消" okButtonProps={{ danger: true }}>
+            <Button type="text" size="small" icon={<DeleteOutlined />} className="danger-icon-button" />
           </Popconfirm>
         </Space>
       ),
@@ -239,14 +273,14 @@ const KnowledgePage: React.FC = () => {
       render: (v: string) => (
         <span style={{
           fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
-          letterSpacing: '0.04em', color: '#8a8580',
+          letterSpacing: '0.04em', color: '#7d8a96',
         }}>{v}</span>
       ),
     },
     {
       title: '大小', dataIndex: 'file_size', key: 'size', width: 80,
       render: (v: number) => (
-        <span style={{ fontVariantNumeric: 'tabular-nums', color: '#6b6560', fontSize: 13 }}>
+        <span style={{ fontVariantNumeric: 'tabular-nums', color: '#667482', fontSize: 13 }}>
           {v ? `${(v / 1024).toFixed(1)} KB` : '—'}
         </span>
       ),
@@ -255,8 +289,8 @@ const KnowledgePage: React.FC = () => {
       title: '策略', key: 'strategy', width: 100,
       render: (_: any, record: any) => {
         const strategy = getDocStrategy(record);
-        if (!strategy) return <span style={{ color: '#c4c0ba' }}>—</span>;
-        const s = strategyLabels[strategy] || { label: strategy, color: '#8a8580' };
+        if (!strategy) return <span style={{ color: '#b3bec8' }}>—</span>;
+        const s = strategyLabels[strategy] || { label: strategy, color: '#7d8a96' };
         return (
           <Tag style={{ background: s.color + '14', color: s.color, border: 'none', fontSize: 11 }}>
             {s.label}
@@ -278,16 +312,41 @@ const KnowledgePage: React.FC = () => {
       ),
     },
     {
-      title: '', key: 'action', width: 80,
+      title: '', key: 'action', width: 100,
       render: (_: any, record: any) => (
         <Space size={2}>
-          {record.status === 'completed' && (
-            <Tooltip title="查看分块">
-              <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => openChunks(record)} style={{ color: '#6b6560' }} />
+          {record.status === 'completed' && record.metadata_json?.strategy && (
+            <Tooltip title="查看分析">
+              <Button
+                type="text"
+                size="small"
+                icon={<ThunderboltOutlined />}
+                onClick={() => { setAnalysisDoc(record); setAnalysisDialogOpen(true); }}
+                className="action-icon-button"
+              />
             </Tooltip>
           )}
-          <Popconfirm title="确认删除?" onConfirm={() => handleDeleteDoc(record.id)} okText="删除" cancelText="取消">
-            <Button type="text" size="small" icon={<DeleteOutlined />} style={{ color: '#c4c0ba' }} />
+          {record.status === 'completed' && (
+            <Tooltip title="查看分块">
+              <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => openChunks(record)} className="action-icon-button" />
+            </Tooltip>
+          )}
+          {record.status === 'completed' && (
+            <Tooltip title="查看转换">
+              <Button
+                type="text"
+                size="small"
+                icon={<FileTextOutlined />}
+                onClick={() => {
+                  setConvertedDoc(record);
+                  setConvertedViewerOpen(true);
+                }}
+                className="action-icon-button"
+              />
+            </Tooltip>
+          )}
+          <Popconfirm title="确认删除?" onConfirm={() => handleDeleteDoc(record.id)} okText="删除" cancelText="取消" okButtonProps={{ danger: true }}>
+            <Button type="text" size="small" icon={<DeleteOutlined />} className="danger-icon-button" />
           </Popconfirm>
         </Space>
       ),
@@ -318,21 +377,21 @@ const KnowledgePage: React.FC = () => {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
         <div className="stat-card">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-            <DatabaseOutlined style={{ fontSize: 16, color: '#e8653a' }} />
+            <DatabaseOutlined style={{ fontSize: 16, color: '#3f6f8f' }} />
             <span className="stat-label">知识库总数</span>
           </div>
           <div className="stat-value">{kbs.length}</div>
         </div>
         <div className="stat-card">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-            <AppstoreOutlined style={{ fontSize: 16, color: '#4a9e6e' }} />
+            <AppstoreOutlined style={{ fontSize: 16, color: '#547b63' }} />
             <span className="stat-label">活跃知识库</span>
           </div>
           <div className="stat-value">{activeKbs}</div>
         </div>
         <div className="stat-card">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-            <FileOutlined style={{ fontSize: 16, color: '#5b8ec9' }} />
+            <FileOutlined style={{ fontSize: 16, color: '#3f6f8f' }} />
             <span className="stat-label">文档总数</span>
           </div>
           <div className="stat-value">{totalDocs}</div>
@@ -340,12 +399,7 @@ const KnowledgePage: React.FC = () => {
       </div>
 
       {/* Table */}
-      <div style={{
-        background: '#fff',
-        borderRadius: 12,
-        border: '1px solid #eae8e4',
-        overflow: 'hidden',
-      }}>
+      <div className="content-panel">
         <Table
           columns={kbColumns}
           dataSource={kbs}
@@ -392,9 +446,9 @@ const KnowledgePage: React.FC = () => {
       <Drawer
         title={
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <FileTextOutlined style={{ color: '#e8653a' }} />
+            <FileTextOutlined style={{ color: '#3f6f8f' }} />
             <span style={{ fontWeight: 600 }}>{selectedKb?.name}</span>
-            <span style={{ fontSize: 13, color: '#8a8580', fontWeight: 400 }}>文档列表</span>
+            <span style={{ fontSize: 13, color: '#7d8a96', fontWeight: 400 }}>文档列表</span>
           </div>
         }
         open={docDrawerOpen}
@@ -408,13 +462,13 @@ const KnowledgePage: React.FC = () => {
                 alignItems: 'center',
                 gap: 4,
                 fontSize: 12,
-                color: '#e8653a',
+                color: '#3f6f8f',
               }}>
                 <span style={{
                   width: 6,
                   height: 6,
                   borderRadius: '50%',
-                  background: '#e8653a',
+                  background: '#3f6f8f',
                   animation: 'pulse 1.5s infinite',
                 }} />
                 处理中，自动刷新...
@@ -445,13 +499,21 @@ const KnowledgePage: React.FC = () => {
         />
       </Drawer>
 
+      {/* Analysis dialog (past results) */}
+      <AnalysisDialog
+        open={analysisDialogOpen}
+        onClose={() => setAnalysisDialogOpen(false)}
+        doc={analysisDoc}
+      />
+
+
       {/* Chunk drawer */}
       <Drawer
         title={
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <AppstoreOutlined style={{ color: '#e8653a' }} />
+            <AppstoreOutlined style={{ color: '#3f6f8f' }} />
             <span style={{ fontWeight: 600 }}>{selectedDoc?.original_filename}</span>
-            <span style={{ fontSize: 13, color: '#8a8580', fontWeight: 400 }}>
+            <span style={{ fontSize: 13, color: '#7d8a96', fontWeight: 400 }}>
               {chunks.length} 个分块
             </span>
           </div>
@@ -463,8 +525,8 @@ const KnowledgePage: React.FC = () => {
         {/* Analysis info banner */}
         {analysis && (
           <div style={{
-            background: '#fafaf8',
-            border: '1px solid #eae8e4',
+            background: '#f8fafc',
+            border: '1px solid #d9e1e8',
             borderRadius: 10,
             padding: '14px 16px',
             marginBottom: 20,
@@ -475,13 +537,13 @@ const KnowledgePage: React.FC = () => {
               gap: 8,
               marginBottom: 8,
             }}>
-              <ThunderboltOutlined style={{ color: '#e8653a', fontSize: 14 }} />
-              <span style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a' }}>
+              <ThunderboltOutlined style={{ color: '#3f6f8f', fontSize: 14 }} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#202a34' }}>
                 自动分析结果
               </span>
               <Tag style={{
-                background: (strategyLabels[analysis.selected]?.color || '#8a8580') + '14',
-                color: strategyLabels[analysis.selected]?.color || '#8a8580',
+                background: (strategyLabels[analysis.selected]?.color || '#7d8a96') + '14',
+                color: strategyLabels[analysis.selected]?.color || '#7d8a96',
                 border: 'none',
                 fontSize: 11,
                 marginLeft: 'auto',
@@ -491,7 +553,7 @@ const KnowledgePage: React.FC = () => {
             </div>
             <div style={{
               fontSize: 12,
-              color: '#6b6560',
+              color: '#667482',
               lineHeight: 1.6,
             }}>
               {analysis.reasoning}
@@ -502,19 +564,19 @@ const KnowledgePage: React.FC = () => {
         <List
           dataSource={chunks}
           renderItem={(item: any) => (
-            <List.Item style={{ borderBottom: '1px solid #f0eeeb', padding: '16px 0' }}>
+            <List.Item style={{ borderBottom: '1px solid #e7edf2', padding: '16px 0' }}>
               <div style={{ width: '100%' }}>
                 <div style={{
                   fontSize: 11,
                   fontWeight: 600,
                   textTransform: 'uppercase',
                   letterSpacing: '0.06em',
-                  color: '#8a8580',
+                  color: '#7d8a96',
                   marginBottom: 8,
                 }}>
                   分块 #{item.chunk_index + 1}
                   {item.token_count && (
-                    <span style={{ fontWeight: 400, marginLeft: 8, color: '#c4c0ba' }}>
+                    <span style={{ fontWeight: 400, marginLeft: 8, color: '#b3bec8' }}>
                       {item.token_count} 字符
                     </span>
                   )}
@@ -523,7 +585,7 @@ const KnowledgePage: React.FC = () => {
                   whiteSpace: 'pre-wrap',
                   fontSize: 13,
                   lineHeight: 1.7,
-                  color: '#1a1a1a',
+                  color: '#202a34',
                 }}>
                   {item.chunk_text}
                 </div>
@@ -532,14 +594,14 @@ const KnowledgePage: React.FC = () => {
                     <Divider style={{ margin: '12px 0' }} />
                     <div style={{
                       fontSize: 12,
-                      color: '#8a8580',
+                      color: '#7d8a96',
                       lineHeight: 1.6,
                       padding: '10px 12px',
-                      background: '#fafaf8',
+                      background: '#f8fafc',
                       borderRadius: 8,
-                      border: '1px solid #f0eeeb',
+                      border: '1px solid #e7edf2',
                     }}>
-                      <span style={{ fontWeight: 600, color: '#6b6560' }}>父级上下文</span>
+                      <span style={{ fontWeight: 600, color: '#667482' }}>父级上下文</span>
                       <div style={{ marginTop: 4 }}>{item.parent_text.slice(0, 200)}...</div>
                     </div>
                   </>
@@ -549,6 +611,15 @@ const KnowledgePage: React.FC = () => {
           )}
         />
       </Drawer>
+
+      {/* Converted text viewer */}
+      <ConvertedTextViewer
+        open={convertedViewerOpen}
+        onClose={() => setConvertedViewerOpen(false)}
+        kbId={convertedDoc?.knowledge_base_id}
+        docId={convertedDoc?.id}
+        fileName={convertedDoc?.original_filename || ''}
+      />
     </>
   );
 };

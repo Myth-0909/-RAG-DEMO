@@ -2,6 +2,7 @@ from typing import List, Dict, Any, AsyncGenerator, Optional
 from sqlalchemy.orm import Session
 from app.services.milvus_service import MilvusService
 from app.services.embedding import embed_query
+from app.services.model_config_service import get_current_llm_config
 from app.models.knowledge import KnowledgeBase, Document, Domain
 from app.config import settings
 from openai import OpenAI
@@ -9,17 +10,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-_llm_client = None
+
+def get_llm_client():
+    """Get LLM client using current active config (DB or .env fallback)."""
+    cfg = get_current_llm_config()
+    return OpenAI(base_url=cfg.base_url, api_key=cfg.api_key)
 
 
-def get_llm_client() -> OpenAI:
-    global _llm_client
-    if _llm_client is None:
-        _llm_client = OpenAI(
-            base_url=settings.LLM_BASE_URL,
-            api_key=settings.LLM_API_KEY,
-        )
-    return _llm_client
+def get_current_model_name() -> str:
+    cfg = get_current_llm_config()
+    return cfg.model_name
 
 
 def retrieve_context(
@@ -137,7 +137,7 @@ async def rag_query(
     # 调用 LLM
     client = get_llm_client()
     response = client.chat.completions.create(
-        model=settings.LLM_MODEL,
+        model=get_current_model_name(),
         messages=messages,
         temperature=0.3,
         max_tokens=2000,
@@ -149,11 +149,14 @@ async def rag_query(
     sources = []
     for hit in kb_context:
         doc = db.query(Document).filter(Document.id == hit["document_id"]).first() if db else None
+        chunk_text = hit.get("chunk_text", "")
         sources.append({
             "document_name": doc.original_filename if doc else "Unknown",
-            "chunk_index": hit["chunk_index"],
-            "score": hit["score"],
-            "text": hit["chunk_text"][:200] + "..." if len(hit["chunk_text"]) > 200 else hit["chunk_text"],
+            "document_id": hit.get("document_id", 0),
+            "chunk_index": hit.get("chunk_index", 0),
+            "score": hit.get("score", 0),
+            "text": chunk_text,
+            "metadata": hit.get("metadata", {}),
         })
 
     return {
@@ -194,8 +197,9 @@ async def rag_query_stream(
         for hit in hits:
             doc = db.query(Document).filter(Document.id == hit.get("document_id")).first()
             sources.append({
-                "text": hit.get("chunk_text", "")[:200],
+                "text": hit.get("chunk_text", ""),
                 "document_name": doc.original_filename if doc else "未知",
+                "document_id": hit.get("document_id", 0),
                 "chunk_index": hit.get("chunk_index", 0),
                 "score": hit.get("score", 0),
                 "metadata": hit.get("metadata"),
@@ -205,7 +209,7 @@ async def rag_query_stream(
 
     client = get_llm_client()
     stream = client.chat.completions.create(
-        model=settings.LLM_MODEL,
+        model=get_current_model_name(),
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},

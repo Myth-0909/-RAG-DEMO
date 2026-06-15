@@ -69,8 +69,8 @@ const UserPage: React.FC = () => {
         <Space>
           <div style={{
             width: 32, height: 32, borderRadius: 8,
-            background: record.is_superuser ? '#e8653a' : '#f4f3f1',
-            color: record.is_superuser ? '#fff' : '#6b6560',
+            background: record.is_superuser ? '#3f6f8f' : '#f1f5f8',
+            color: record.is_superuser ? '#fff' : '#667482',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontWeight: 600, fontSize: 13,
           }}>
@@ -78,7 +78,7 @@ const UserPage: React.FC = () => {
           </div>
           <div>
             <div style={{ fontWeight: 500, fontSize: 14 }}>{record.full_name || record.username}</div>
-            <div style={{ fontSize: 12, color: '#8a8580' }}>@{record.username}</div>
+            <div style={{ fontSize: 12, color: '#7d8a96' }}>@{record.username}</div>
           </div>
         </Space>
       ),
@@ -89,7 +89,7 @@ const UserPage: React.FC = () => {
       render: (_: any, record: any) => (
         <Space size={4}>
           {record.roles?.map((r: any) => (
-            <Tag key={r.id} style={{ background: '#f4f3f1', color: '#6b6560', border: 'none' }}>
+            <Tag key={r.id} style={{ background: '#f1f5f8', color: '#667482', border: 'none' }}>
               {r.name}
             </Tag>
           ))}
@@ -104,7 +104,7 @@ const UserPage: React.FC = () => {
       render: (v: boolean) => (
         <div style={{
           width: 8, height: 8, borderRadius: '50%',
-          background: v ? '#4a9e6e' : '#c4c0ba',
+          background: v ? '#547b63' : '#b3bec8',
           display: 'inline-block',
         }} />
       ),
@@ -115,10 +115,10 @@ const UserPage: React.FC = () => {
       width: 100,
       render: (_: any, record: any) => (
         <Space size={4}>
-          <Button type="text" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)} style={{ color: '#6b6560' }} />
+          <Button type="text" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)} className="action-icon-button" />
           {!record.is_superuser && (
-            <Popconfirm title="确认删除?" onConfirm={() => handleDelete(record.id)} okText="删除" cancelText="取消">
-              <Button type="text" size="small" icon={<DeleteOutlined />} style={{ color: '#c4c0ba' }} />
+            <Popconfirm title="确认删除?" onConfirm={() => handleDelete(record.id)} okText="删除" cancelText="取消" okButtonProps={{ danger: true }}>
+              <Button type="text" size="small" icon={<DeleteOutlined />} className="danger-icon-button" />
             </Popconfirm>
           )}
         </Space>
@@ -143,9 +143,7 @@ const UserPage: React.FC = () => {
         </Button>
       </div>
 
-      <div style={{
-        background: '#fff', borderRadius: 12, border: '1px solid #eae8e4', overflow: 'hidden',
-      }}>
+      <div className="content-panel">
         <Table
           columns={columns}
           dataSource={users}

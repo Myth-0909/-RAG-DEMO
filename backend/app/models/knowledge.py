@@ -33,6 +33,7 @@ class Document(Base):
     chunk_count = Column(Integer, default=0)
     metadata_json = Column(JSON, nullable=True)
     error_message = Column(Text, nullable=True)
+    converted_text = Column(Text, nullable=True)  # raw markdown from docling/legacy converter
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

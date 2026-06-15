@@ -7,6 +7,7 @@ from app.database import engine, Base, SessionLocal
 from app.models.user import User
 from app.models.role import Role, Permission, UserRole
 from app.models.knowledge import KnowledgeBase, Document, DocumentChunk, Domain
+from app.models.model_config import ModelConfig, ModelConfigHistory
 from app.core.security import get_password_hash
 
 
@@ -25,9 +26,12 @@ def seed():
             ("system", "系统管理", "menu", None, "/system", "SettingOutlined", 1),
             ("system:user", "用户管理", "menu", "system", "/system/users", "UserOutlined", 2),
             ("system:role", "角色管理", "menu", "system", "/system/roles", "TeamOutlined", 3),
-            ("knowledge", "知识库管理", "menu", None, "/knowledge", "DatabaseOutlined", 4),
-            ("chat", "智能问答", "menu", None, "/chat", "MessageOutlined", 5),
-            ("domain", "专业领域", "menu", None, "/domain", "GlobalOutlined", 6),
+            ("system:menu", "菜单管理", "menu", "system", "/system/menus", "MenuOutlined", 4),
+            ("knowledge", "知识库管理", "menu", None, "/knowledge", "DatabaseOutlined", 5),
+            ("chat", "智能问答", "menu", None, "/chat", "MessageOutlined", 6),
+            ("domain", "专业领域", "menu", None, "/domain", "GlobalOutlined", 7),
+            ("model_config", "模型配置", "menu", None, "/model-config", "RobotOutlined", 8),
+            ("processing_tasks", "处理任务", "menu", None, "/processing-tasks", "ThunderboltOutlined", 9),
             # Buttons / Operations
             ("system:user:create", "创建用户", "button", "system:user", None, None, 10),
             ("system:user:update", "编辑用户", "button", "system:user", None, None, 11),

@@ -14,7 +14,12 @@
       "Bash(alembic *)",
       "Bash(npm run *)",
       "Bash(git remote *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(tesseract *)",
+      "Bash(brew *)",
+      "Bash(which *)",
+      "Agent(Explore)",
+      "Bash(pip show *)"
     ]
   },
   "$version": 4

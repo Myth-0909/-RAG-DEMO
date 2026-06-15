@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional
+from sse_starlette.sse import EventSourceResponse
 import json
 import os
 import uuid
@@ -12,7 +13,7 @@ from app.schemas.knowledge import (
     DocumentResponse, ChunkResponse,
 )
 from app.core.deps import get_current_user, require_permission
-from app.services.document import process_document
+from app.services.document import process_document_stream
 
 router = APIRouter(prefix="/knowledge", tags=["知识库管理"])
 
@@ -96,6 +97,9 @@ def delete_knowledge_base(
     if not kb:
         raise HTTPException(status_code=404, detail="知识库不存在")
 
+    from app.models.processing_task import ProcessingTask
+    db.query(ProcessingTask).filter(ProcessingTask.knowledge_base_id == kb_id).delete()
+
     from app.services.milvus_service import MilvusService
     milvus = MilvusService()
     milvus.drop_collection(f"kb_{kb.id}")
@@ -119,7 +123,6 @@ def list_documents(
 @router.post("/{kb_id}/documents", response_model=DocumentResponse)
 async def upload_document(
     kb_id: int,
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     metadata_json: Optional[str] = Form(None),
     db: Session = Depends(get_db),
@@ -154,9 +157,61 @@ async def upload_document(
     db.commit()
     db.refresh(doc)
 
-    background_tasks.add_task(process_document, doc.id, file_path, metadata)
+    from app.models.processing_task import ProcessingTask
+    task = ProcessingTask(
+        document_id=doc.id,
+        knowledge_base_id=kb_id,
+        status="pending",
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    from app.services.background_processor import start_background_processing
+    start_background_processing(
+        task_id=task.id,
+        doc_id=doc.id,
+        file_path=file_path,
+        metadata=metadata or {},
+    )
 
     return doc
+
+
+@router.get("/{kb_id}/documents/{doc_id}/process-stream")
+async def process_document_sse(
+    kb_id: int,
+    doc_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """SSE endpoint: streams the LLM analysis and processing of a document."""
+    doc = db.query(Document).filter(
+        Document.id == doc_id, Document.knowledge_base_id == kb_id
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="文档不存在")
+
+    if doc.status == "completed":
+        raise HTTPException(status_code=400, detail="文档已处理完成")
+
+    file_path = os.path.join("uploads", doc.filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=400, detail="文件不存在")
+
+    metadata = doc.metadata_json or {}
+
+    async def event_generator():
+        async for event in process_document_stream(doc_id, file_path, metadata):
+            if await request.is_disconnected():
+                break
+            yield {
+                "event": event.get("step", "unknown"),
+                "data": json.dumps(event, ensure_ascii=False),
+            }
+
+    return EventSourceResponse(event_generator())
 
 
 @router.get("/{kb_id}/documents/{doc_id}", response_model=DocumentResponse)
@@ -174,6 +229,28 @@ def get_document(
     return doc
 
 
+@router.get("/{kb_id}/documents/{doc_id}/converted")
+def get_document_converted(
+    kb_id: int,
+    doc_id: int,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """获取文档转换后的原始 Markdown 文本。"""
+    doc = db.query(Document).filter(
+        Document.id == doc_id, Document.knowledge_base_id == kb_id
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    if not doc.converted_text:
+        raise HTTPException(status_code=404, detail="转换文本暂不可用，请等待处理完成")
+    return {
+        "converted_text": doc.converted_text,
+        "filename": doc.original_filename,
+        "converter": doc.metadata_json.get("conversion", {}).get("converter", "unknown") if doc.metadata_json else "unknown",
+    }
+
+
 @router.delete("/{kb_id}/documents/{doc_id}")
 def delete_document(
     kb_id: int,
@@ -187,13 +264,25 @@ def delete_document(
     if not doc:
         raise HTTPException(status_code=404, detail="文档不存在")
 
-    from app.services.milvus_service import MilvusService
-    milvus = MilvusService()
-    milvus.delete_by_document(f"kb_{kb_id}", doc_id)
+    from app.models.processing_task import ProcessingTask
+    db.query(ProcessingTask).filter(ProcessingTask.document_id == doc_id).delete()
+
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        from app.services.milvus_service import MilvusService
+        milvus = MilvusService()
+        milvus.delete_by_document(f"kb_{kb_id}", doc_id)
+    except Exception as e:
+        logger.warning(f"Milvus 删除向量数据失败 (doc_id={doc_id}): {e}")
 
     file_path = os.path.join("uploads", doc.filename)
     if os.path.exists(file_path):
-        os.remove(file_path)
+        try:
+            os.remove(file_path)
+        except OSError as e:
+            logger.warning(f"删除文件失败 ({file_path}): {e}")
 
     db.delete(doc)
     db.commit()

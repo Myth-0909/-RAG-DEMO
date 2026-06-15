@@ -37,6 +37,12 @@ class PermissionResponse(PermissionBase):
         from_attributes = True
 
 
+class PermissionSortItem(BaseModel):
+    id: int
+    parent_id: Optional[int] = None
+    sort_order: int
+
+
 class RoleBase(BaseModel):
     name: str
     description: Optional[str] = None

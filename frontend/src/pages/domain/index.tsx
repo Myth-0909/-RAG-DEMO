@@ -70,7 +70,7 @@ const DomainPage: React.FC = () => {
       dataIndex: 'description',
       key: 'description',
       ellipsis: true,
-      render: (v: string) => <span style={{ color: '#8a8580' }}>{v || '—'}</span>,
+      render: (v: string) => <span style={{ color: '#7d8a96' }}>{v || '—'}</span>,
     },
     {
       title: '系统提示词',
@@ -79,7 +79,7 @@ const DomainPage: React.FC = () => {
       ellipsis: true,
       width: 300,
       render: (v: string) => (
-        <span style={{ color: '#6b6560', fontSize: 13 }}>
+        <span style={{ color: '#667482', fontSize: 13 }}>
           {v ? v.slice(0, 60) + (v.length > 60 ? '...' : '') : '—'}
         </span>
       ),
@@ -92,7 +92,7 @@ const DomainPage: React.FC = () => {
       render: (v: boolean) => (
         <div style={{
           width: 8, height: 8, borderRadius: '50%',
-          background: v ? '#4a9e6e' : '#c4c0ba',
+          background: v ? '#547b63' : '#b3bec8',
           display: 'inline-block',
         }} />
       ),
@@ -103,9 +103,9 @@ const DomainPage: React.FC = () => {
       width: 100,
       render: (_: any, record: any) => (
         <Space size={4}>
-          <Button type="text" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)} style={{ color: '#6b6560' }} />
-          <Popconfirm title="确认删除?" onConfirm={() => handleDelete(record.id)} okText="删除" cancelText="取消">
-            <Button type="text" size="small" icon={<DeleteOutlined />} style={{ color: '#c4c0ba' }} />
+          <Button type="text" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)} className="action-icon-button" />
+          <Popconfirm title="确认删除?" onConfirm={() => handleDelete(record.id)} okText="删除" cancelText="取消" okButtonProps={{ danger: true }}>
+            <Button type="text" size="small" icon={<DeleteOutlined />} className="danger-icon-button" />
           </Popconfirm>
         </Space>
       ),
@@ -129,9 +129,7 @@ const DomainPage: React.FC = () => {
         </Button>
       </div>
 
-      <div style={{
-        background: '#fff', borderRadius: 12, border: '1px solid #eae8e4', overflow: 'hidden',
-      }}>
+      <div className="content-panel">
         <Table
           columns={columns}
           dataSource={domains}

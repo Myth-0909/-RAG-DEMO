@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Input, Button, Select, Space, Typography, Spin, Tag, List, Popconfirm, message } from 'antd';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { Input, Button, Select, Spin, Tag, List, Popconfirm, message, Empty, Drawer } from 'antd';
 import {
   SendOutlined, MessageOutlined, BookOutlined,
-  PlusOutlined, DeleteOutlined,
+  PlusOutlined, DeleteOutlined, DatabaseOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons';
 import {
   getKnowledgeBases, getDomains, chatQuery,
@@ -10,17 +11,19 @@ import {
 } from '@/services/api';
 
 const { TextArea } = Input;
-const { Text, Paragraph } = Typography;
 
 interface Message {
   role: 'user' | 'assistant';
   content: string;
   sources?: any[];
+  isError?: boolean;
 }
 
 interface Conversation {
   id: number;
   title: string;
+  knowledge_base_ids: number[];
+  domain_id: number | null;
   message_count: number;
   updated_at: string;
 }
@@ -35,8 +38,16 @@ const ChatPage: React.FC = () => {
   const [selectedDomain, setSelectedDomain] = useState<number | undefined>();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<number | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [sourceDetail, setSourceDetail] = useState<any>(null);
+  const [sourceDrawerOpen, setSourceDrawerOpen] = useState(false);
+  const [conversationLoading, setConversationLoading] = useState(false);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<any>(null);
+
+  const currentConversation = useMemo(
+    () => conversations.find((conv) => conv.id === currentConversationId),
+    [conversations, currentConversationId],
+  );
 
   useEffect(() => {
     getKnowledgeBases().then(res => setKbs(res.data.filter((kb: any) => kb.is_active)));
@@ -44,39 +55,60 @@ const ChatPage: React.FC = () => {
     loadConversations();
   }, []);
 
+  const scrollMessagesToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const container = messagesContainerRef.current;
+        if (!container) return;
+        container.scrollTo({
+          top: container.scrollHeight,
+          behavior,
+        });
+      });
+    });
+  };
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    scrollMessagesToBottom('smooth');
   }, [messages]);
 
   const loadConversations = async () => {
+    setConversationLoading(true);
     try {
       const res = await getConversations();
       setConversations(res.data);
     } catch (err) {
       console.error('Failed to load conversations:', err);
+    } finally {
+      setConversationLoading(false);
     }
   };
 
-  const loadConversationMessages = async (conversationId: number) => {
+  const loadConversationMessages = async (conv: Conversation) => {
+    if (loading) return;
     try {
-      const res = await getConversationMessages(conversationId);
+      const res = await getConversationMessages(conv.id);
       const msgs: Message[] = res.data.map((m: any) => ({
         role: m.role,
         content: m.content,
         sources: m.sources,
       }));
       setMessages(msgs);
-      setCurrentConversationId(conversationId);
+      setCurrentConversationId(conv.id);
+      setSelectedKbs(conv.knowledge_base_ids || []);
+      setSelectedDomain(conv.domain_id ?? undefined);
+      scrollMessagesToBottom('auto');
     } catch (err) {
       console.error('Failed to load messages:', err);
+      message.error('无法加载此对话');
     }
   };
 
-  const handleNewConversation = () => {
+  const handleNewConversation = (showTip = true) => {
     setCurrentConversationId(null);
     setMessages([]);
     setInput('');
-    message.success('已创建新对话');
+    if (showTip) message.success('已切换到新对话');
     setTimeout(() => inputRef.current?.focus(), 100);
   };
 
@@ -84,25 +116,32 @@ const ChatPage: React.FC = () => {
     try {
       await deleteConversation(id);
       if (currentConversationId === id) {
-        handleNewConversation();
+        handleNewConversation(false);
       }
+      message.success('已删除对话');
       loadConversations();
     } catch (err) {
       console.error('Failed to delete conversation:', err);
+      message.error('删除对话失败');
     }
   };
 
   const handleSend = async () => {
-    if (!input.trim() || selectedKbs.length === 0) return;
+    const question = input.trim();
+    if (!question) return;
+    if (selectedKbs.length === 0) {
+      message.warning('请先选择知识库');
+      return;
+    }
 
-    const userMsg: Message = { role: 'user', content: input };
+    const userMsg: Message = { role: 'user', content: question };
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setLoading(true);
 
     try {
       const res = await chatQuery({
-        question: input,
+        question,
         knowledge_base_ids: selectedKbs,
         conversation_id: currentConversationId,
         domain_id: selectedDomain,
@@ -112,7 +151,6 @@ const ChatPage: React.FC = () => {
       // 更新当前对话 ID
       if (res.data.conversation_id && !currentConversationId) {
         setCurrentConversationId(res.data.conversation_id);
-        loadConversations();
       }
 
       const assistantMsg: Message = {
@@ -121,10 +159,12 @@ const ChatPage: React.FC = () => {
         sources: res.data.sources,
       };
       setMessages(prev => [...prev, assistantMsg]);
+      loadConversations();
     } catch (err: any) {
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: '查询出错：' + (err.response?.data?.detail || err.message),
+        content: '查询失败：' + (err.response?.data?.detail || err.message),
+        isError: true,
       }]);
     } finally {
       setLoading(false);
@@ -133,57 +173,52 @@ const ChatPage: React.FC = () => {
   };
 
   return (
-    <div style={{ display: 'flex', gap: 16, height: 'calc(100dvh - 120px)' }}>
-      {/* 左侧对话列表 */}
-      <div style={{
-        width: 280,
-        background: '#fff',
-        borderRadius: 12,
-        border: '1px solid #eae8e4',
-        display: 'flex',
-        flexDirection: 'column',
-      }}>
-        <div style={{ padding: '16px', borderBottom: '1px solid #eae8e4' }}>
+    <div className="chat-shell">
+      <aside className="chat-sidebar">
+        <div className="chat-sidebar-head">
+          <div className="chat-sidebar-title">
+            <span>对话</span>
+            <span>{conversations.length}</span>
+          </div>
           <Button
             type="primary"
             icon={<PlusOutlined />}
-            onClick={handleNewConversation}
+            onClick={() => handleNewConversation()}
             block
-            style={{ borderRadius: 8 }}
+            className="chat-new-button"
           >
             新对话
           </Button>
         </div>
-        <div style={{ flex: 1, overflow: 'auto', padding: '8px' }}>
+        <div className="conversation-list">
           <List
+            loading={conversationLoading}
             dataSource={conversations}
+            locale={{
+              emptyText: (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description="暂无历史对话"
+                />
+              ),
+            }}
             renderItem={(conv) => (
               <List.Item
-                style={{
-                  padding: '12px',
-                  borderRadius: 8,
-                  cursor: 'pointer',
-                  background: currentConversationId === conv.id ? '#f5f5f5' : 'transparent',
-                  border: 'none',
-                }}
-                onClick={() => loadConversationMessages(conv.id)}
+                className={`conversation-item ${currentConversationId === conv.id ? 'conversation-item-active' : ''}`}
+                style={{ borderBlockEnd: 'none' }}
+                onClick={() => loadConversationMessages(conv)}
               >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{
-                    fontSize: 14,
-                    fontWeight: 500,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}>
-                    {conv.title}
-                  </div>
-                  <div style={{ fontSize: 12, color: '#8a8580', marginTop: 4 }}>
-                    {conv.message_count} 条消息
+                <div className="conversation-content">
+                  <div className="conversation-title">{conv.title}</div>
+                  <div className="conversation-meta">
+                    <span>{conv.message_count} 条消息</span>
                   </div>
                 </div>
                 <Popconfirm
                   title="确定删除此对话？"
+                  okText="删除"
+                  cancelText="取消"
+                  okButtonProps={{ danger: true }}
                   onConfirm={(e) => {
                     e?.stopPropagation();
                     handleDeleteConversation(conv.id);
@@ -195,30 +230,29 @@ const ChatPage: React.FC = () => {
                     size="small"
                     icon={<DeleteOutlined />}
                     onClick={(e) => e.stopPropagation()}
-                    style={{ color: '#8a8580' }}
+                    className="danger-icon-button conversation-delete"
                   />
                 </Popconfirm>
               </List.Item>
             )}
           />
         </div>
-      </div>
+      </aside>
 
-      {/* 右侧聊天区域 */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-        {/* Config bar */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          padding: '12px 16px',
-          background: '#fff',
-          borderRadius: 12,
-          border: '1px solid #eae8e4',
-          marginBottom: 16,
-          flexWrap: 'wrap',
-        }}>
-          <BookOutlined style={{ color: '#e8653a', fontSize: 15 }} />
+      <main className="chat-main">
+        <div className="chat-workspace-header">
+          <div>
+            <div className="chat-kicker">智能问答</div>
+            <h2 className="chat-title">{currentConversation?.title || '新对话'}</h2>
+          </div>
+          <div className="chat-meta">
+            <span><DatabaseOutlined /> {selectedKbs.length || 0} 个知识库</span>
+            <span>{selectedDomain ? '已选择领域' : '通用领域'}</span>
+          </div>
+        </div>
+
+        <div className="chat-config">
+          <BookOutlined style={{ color: '#3f6f8f', fontSize: 15 }} />
           <Select
             mode="multiple"
             style={{ minWidth: 260, flex: 1 }}
@@ -228,8 +262,8 @@ const ChatPage: React.FC = () => {
             options={kbs.map(kb => ({ label: kb.name, value: kb.id }))}
             maxTagCount="responsive"
           />
-          <div style={{ width: 1, height: 24, background: '#eae8e4' }} />
-          <span style={{ fontSize: 12, color: '#8a8580', fontWeight: 500 }}>领域</span>
+          <div style={{ width: 1, height: 24, background: '#d9e1e8' }} />
+          <span style={{ fontSize: 12, color: '#667482', fontWeight: 700 }}>领域</span>
           <Select
             style={{ width: 140 }}
             placeholder="通用"
@@ -240,72 +274,36 @@ const ChatPage: React.FC = () => {
           />
         </div>
 
-        {/* Messages area */}
-        <div style={{
-          flex: 1,
-          overflow: 'auto',
-          background: '#fff',
-          borderRadius: 12,
-          border: '1px solid #eae8e4',
-          padding: '24px 28px',
-        }}>
+        <div className="chat-messages" ref={messagesContainerRef}>
           {messages.length === 0 ? (
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '100%',
-              color: '#a09a94',
-            }}>
-              <div style={{
-                width: 64,
-                height: 64,
-                borderRadius: 16,
-                background: '#f4f3f1',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: 20,
-              }}>
-                <MessageOutlined style={{ fontSize: 24, color: '#c4c0ba' }} />
+            <div className="chat-empty">
+              <div className="chat-empty-icon">
+                <MessageOutlined style={{ fontSize: 24, color: '#3f6f8f' }} />
               </div>
-              <div style={{
-                fontSize: 16,
-                fontWeight: 600,
-                color: '#6b6560',
-                marginBottom: 6,
-              }}>
+              <div className="chat-empty-title">
                 开始对话
               </div>
-              <div style={{
-                fontSize: 13,
-                color: '#a09a94',
-                textAlign: 'center',
-                maxWidth: 300,
-                lineHeight: 1.6,
-              }}>
-                选择一个或多个知识库，输入问题开始基于向量检索的智能问答
+              <div className="chat-empty-desc">
+                {selectedKbs.length > 0
+                  ? '输入问题后，系统会检索知识库并附上来源。'
+                  : '先选择一个或多个知识库，再开始提问。'}
               </div>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <div className="chat-thread">
               {messages.map((msg, idx) => (
                 <div
                   key={idx}
-                  style={{
-                    display: 'flex',
-                    justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                  }}
+                  className={`chat-message-row ${msg.role === 'user' ? 'chat-message-row-user' : 'chat-message-row-assistant'}`}
                 >
-                  <div className={msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-assistant'}>
+                  <div className={msg.role === 'user' ? 'chat-bubble-user' : `chat-bubble-assistant ${msg.isError ? 'chat-bubble-error' : ''}`}>
                     {msg.role === 'assistant' && (
                       <div style={{
                         fontSize: 11,
                         fontWeight: 600,
                         textTransform: 'uppercase',
                         letterSpacing: '0.06em',
-                        color: '#e8653a',
+                        color: '#3f6f8f',
                         marginBottom: 8,
                       }}>
                         回答
@@ -326,34 +324,48 @@ const ChatPage: React.FC = () => {
                           textTransform: 'uppercase',
                           letterSpacing: '0.06em',
                           marginBottom: 8,
-                          color: '#6b6560',
+                          color: '#667482',
                         }}>
                           参考来源
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                           {msg.sources.map((s: any, i: number) => (
-                            <div key={i} style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 6,
-                              fontSize: 12,
-                            }}>
+                            <div
+                              key={i}
+                              onClick={() => { setSourceDetail(s); setSourceDrawerOpen(true); }}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                fontSize: 12,
+                                cursor: 'pointer',
+                                padding: '4px 6px',
+                                borderRadius: 6,
+                                transition: 'background 0.15s',
+                              }}
+                              onMouseEnter={(e) => {
+                                (e.currentTarget as HTMLElement).style.background = '#f0f4f8';
+                              }}
+                              onMouseLeave={(e) => {
+                                (e.currentTarget as HTMLElement).style.background = 'transparent';
+                              }}
+                            >
                               <span style={{
-                                color: '#8a8580',
+                                color: '#7d8a96',
                                 fontVariantNumeric: 'tabular-nums',
                               }}>[{i + 1}]</span>
-                              <span style={{ color: '#1a1a1a', fontWeight: 500 }}>
+                              <span style={{ color: '#202a34', fontWeight: 500 }}>
                                 {s.document_name}
                               </span>
                               <Tag style={{
                                 fontSize: 10,
                                 padding: '0 5px',
-                                background: '#f4f3f1',
+                                background: '#f1f5f8',
                                 border: 'none',
-                                color: '#8a8580',
+                                color: '#7d8a96',
                                 borderRadius: 3,
                               }}>
-                                {(s.score * 100).toFixed(1)}%
+                                {typeof s.score === 'number' ? `${(s.score * 100).toFixed(1)}%` : '来源'}
                               </Tag>
                             </div>
                           ))}
@@ -377,7 +389,7 @@ const ChatPage: React.FC = () => {
                   display: 'flex',
                   alignItems: 'center',
                   gap: 8,
-                  color: '#8a8580',
+                  color: '#7d8a96',
                   fontSize: 13,
                 }}>
                   <Spin size="small" />
@@ -386,20 +398,9 @@ const ChatPage: React.FC = () => {
               </div>
             </div>
           )}
-          <div ref={messagesEndRef} />
         </div>
 
-        {/* Input area */}
-        <div style={{
-          marginTop: 12,
-          background: '#fff',
-          borderRadius: 12,
-          border: '1px solid #eae8e4',
-          padding: '12px 16px',
-          display: 'flex',
-          alignItems: 'flex-end',
-          gap: 12,
-        }}>
+        <div className="chat-input-bar">
           <TextArea
             ref={inputRef}
             value={input}
@@ -435,7 +436,95 @@ const ChatPage: React.FC = () => {
             }}
           />
         </div>
-      </div>
+      </main>
+
+      {/* Source chunk detail drawer */}
+      <Drawer
+        open={sourceDrawerOpen}
+        onClose={() => setSourceDrawerOpen(false)}
+        width={560}
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <FileTextOutlined style={{ color: '#3f6f8f' }} />
+            <span style={{ fontWeight: 600 }}>检索来源详情</span>
+          </div>
+        }
+      >
+        {sourceDetail && (
+          <div>
+            <div style={{
+              background: '#f8fafc',
+              border: '1px solid #d9e1e8',
+              borderRadius: 10,
+              padding: '14px 16px',
+              marginBottom: 20,
+            }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#667482' }}>文档</span>
+                  <span style={{ fontWeight: 500, color: '#202a34' }}>{sourceDetail.document_name}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#667482' }}>分块序号</span>
+                  <span style={{ fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>#{sourceDetail.chunk_index}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#667482' }}>相关性</span>
+                  <Tag style={{
+                    fontSize: 11, border: 'none',
+                    color: '#3f6f8f', background: '#e9f0f5',
+                  }}>
+                    {typeof sourceDetail.score === 'number'
+                      ? `${(sourceDetail.score * 100).toFixed(1)}%`
+                      : '—'}
+                  </Tag>
+                </div>
+                {sourceDetail.metadata && Object.keys(sourceDetail.metadata).length > 0 && (
+                  <>
+                    <div style={{ borderTop: '1px solid #e7edf2', margin: '4px 0' }} />
+                    {Object.entries(sourceDetail.metadata).map(([k, v]) => (
+                      <div key={k} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: '#667482' }}>{k}</span>
+                        <span style={{ fontWeight: 500, color: '#202a34', maxWidth: '60%', textAlign: 'right' }}>
+                          {typeof v === 'boolean' ? (v ? '是' : '否') : String(v)}
+                        </span>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div style={{
+              fontSize: 12,
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              color: '#667482',
+              marginBottom: 10,
+            }}>
+              完整分块内容
+            </div>
+            <pre style={{
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              fontFamily: '"SF Mono", "Fira Code", monospace',
+              fontSize: 13,
+              lineHeight: 1.7,
+              color: '#2c2c2c',
+              background: '#faf9f7',
+              padding: 16,
+              borderRadius: 8,
+              border: '1px solid #eee',
+              maxHeight: 'calc(100vh - 380px)',
+              overflowY: 'auto',
+              margin: 0,
+            }}>
+              {sourceDetail.text}
+            </pre>
+          </div>
+        )}
+      </Drawer>
     </div>
   );
 };

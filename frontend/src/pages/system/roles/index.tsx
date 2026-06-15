@@ -30,7 +30,7 @@ const RolePage: React.FC = () => {
       title: (
         <span style={{ fontSize: 13 }}>
           {p.name}
-          <span style={{ color: '#a09a94', fontSize: 11, marginLeft: 6 }}>
+          <span style={{ color: '#96a2ae', fontSize: 11, marginLeft: 6 }}>
             {p.type === 'menu' ? '菜单' : p.type === 'button' ? '按钮' : '接口'}
           </span>
         </span>
@@ -86,7 +86,7 @@ const RolePage: React.FC = () => {
           <span style={{ fontWeight: 500 }}>{record.name}</span>
           {record.is_system && (
             <Tag style={{
-              background: '#fdf2ed', color: '#e8653a', border: 'none',
+              background: '#eaf1f5', color: '#3f6f8f', border: 'none',
               fontSize: 10, padding: '0 6px', borderRadius: 3,
             }}>系统</Tag>
           )}
@@ -97,7 +97,7 @@ const RolePage: React.FC = () => {
       title: '描述',
       dataIndex: 'description',
       key: 'description',
-      render: (v: string) => <span style={{ color: '#8a8580' }}>{v || '—'}</span>,
+      render: (v: string) => <span style={{ color: '#7d8a96' }}>{v || '—'}</span>,
     },
     {
       title: '权限',
@@ -117,9 +117,9 @@ const RolePage: React.FC = () => {
         <Space size={4}>
           {!record.is_system && (
             <>
-              <Button type="text" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)} style={{ color: '#6b6560' }} />
-              <Popconfirm title="确认删除?" onConfirm={() => handleDelete(record.id)} okText="删除" cancelText="取消">
-                <Button type="text" size="small" icon={<DeleteOutlined />} style={{ color: '#c4c0ba' }} />
+              <Button type="text" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)} className="action-icon-button" />
+              <Popconfirm title="确认删除?" onConfirm={() => handleDelete(record.id)} okText="删除" cancelText="取消" okButtonProps={{ danger: true }}>
+                <Button type="text" size="small" icon={<DeleteOutlined />} className="danger-icon-button" />
               </Popconfirm>
             </>
           )}
@@ -145,9 +145,7 @@ const RolePage: React.FC = () => {
         </Button>
       </div>
 
-      <div style={{
-        background: '#fff', borderRadius: 12, border: '1px solid #eae8e4', overflow: 'hidden',
-      }}>
+      <div className="content-panel">
         <Table
           columns={columns}
           dataSource={roles}
@@ -182,10 +180,10 @@ const RolePage: React.FC = () => {
           <Form.Item name="description" label="描述">
             <Input placeholder="角色描述" style={{ borderRadius: 8 }} />
           </Form.Item>
-          <Form.Item label={<span style={{ fontWeight: 500, fontSize: 13, color: '#6b6560' }}>权限分配</span>}>
+          <Form.Item label={<span style={{ fontWeight: 500, fontSize: 13, color: '#667482' }}>权限分配</span>}>
             <div style={{
-              background: '#fafaf8',
-              border: '1px solid #eae8e4',
+              background: '#f8fafc',
+              border: '1px solid #d9e1e8',
               borderRadius: 8,
               padding: '12px 16px',
               maxHeight: 280,

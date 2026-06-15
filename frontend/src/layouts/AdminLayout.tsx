@@ -2,7 +2,19 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Layout, Menu, Avatar, Dropdown, Space, Typography } from 'antd';
 import {
+  ApiOutlined,
+  AppstoreOutlined,
+  AuditOutlined,
+  BarChartOutlined,
+  BellOutlined,
+  CloudOutlined,
+  ClusterOutlined,
+  ControlOutlined,
+  DashboardOutlined,
   DatabaseOutlined,
+  DeploymentUnitOutlined,
+  FileTextOutlined,
+  FolderOutlined,
   MessageOutlined,
   SettingOutlined,
   UserOutlined,
@@ -11,15 +23,57 @@ import {
   LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  MenuOutlined,
+  RobotOutlined,
+  ThunderboltOutlined,
+  HomeOutlined,
+  KeyOutlined,
+  PartitionOutlined,
+  ProfileOutlined,
+  SafetyCertificateOutlined,
+  ScheduleOutlined,
+  SearchOutlined,
+  ToolOutlined,
 } from '@ant-design/icons';
-import { getMe } from '@/services/api';
+import { getMe, getVisibleMenuTree } from '@/services/api';
 import { removeToken, setUserInfo, getUserInfo } from '@/utils/auth';
 
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
 
-// 所有菜单项及其所需权限
-const allMenuItems = [
+const iconMap: Record<string, React.ReactNode> = {
+  ApiOutlined: <ApiOutlined />,
+  AppstoreOutlined: <AppstoreOutlined />,
+  AuditOutlined: <AuditOutlined />,
+  BarChartOutlined: <BarChartOutlined />,
+  BellOutlined: <BellOutlined />,
+  CloudOutlined: <CloudOutlined />,
+  ClusterOutlined: <ClusterOutlined />,
+  ControlOutlined: <ControlOutlined />,
+  DashboardOutlined: <DashboardOutlined />,
+  DatabaseOutlined: <DatabaseOutlined />,
+  DeploymentUnitOutlined: <DeploymentUnitOutlined />,
+  FileTextOutlined: <FileTextOutlined />,
+  FolderOutlined: <FolderOutlined />,
+  GlobalOutlined: <GlobalOutlined />,
+  HomeOutlined: <HomeOutlined />,
+  KeyOutlined: <KeyOutlined />,
+  MenuOutlined: <MenuOutlined />,
+  MessageOutlined: <MessageOutlined />,
+  PartitionOutlined: <PartitionOutlined />,
+  ProfileOutlined: <ProfileOutlined />,
+  RobotOutlined: <RobotOutlined />,
+  SafetyCertificateOutlined: <SafetyCertificateOutlined />,
+  ScheduleOutlined: <ScheduleOutlined />,
+  SearchOutlined: <SearchOutlined />,
+  SettingOutlined: <SettingOutlined />,
+  TeamOutlined: <TeamOutlined />,
+  ThunderboltOutlined: <ThunderboltOutlined />,
+  ToolOutlined: <ToolOutlined />,
+  UserOutlined: <UserOutlined />,
+};
+
+const staticMenuItems = [
   {
     key: '/knowledge',
     icon: <DatabaseOutlined />,
@@ -39,6 +93,18 @@ const allMenuItems = [
     permission: 'domain',
   },
   {
+    key: '/model-config',
+    icon: <RobotOutlined />,
+    label: '模型配置',
+    permission: 'model_config',
+  },
+  {
+    key: '/processing-tasks',
+    icon: <ThunderboltOutlined />,
+    label: '处理任务',
+    permission: 'processing_tasks',
+  },
+  {
     key: '/system',
     icon: <SettingOutlined />,
     label: '系统',
@@ -46,9 +112,82 @@ const allMenuItems = [
     children: [
       { key: '/system/users', icon: <UserOutlined />, label: '用户管理', permission: 'system:user' },
       { key: '/system/roles', icon: <TeamOutlined />, label: '角色管理', permission: 'system:role' },
+      { key: '/system/menus', icon: <MenuOutlined />, label: '菜单管理', permission: 'system:menu' },
     ],
   },
 ];
+
+const routeIconFallback: Record<string, React.ReactNode> = {
+  '/knowledge': <DatabaseOutlined />,
+  '/chat': <MessageOutlined />,
+  '/domain': <GlobalOutlined />,
+  '/model-config': <RobotOutlined />,
+  '/processing-tasks': <ThunderboltOutlined />,
+  '/system': <SettingOutlined />,
+  '/system/users': <UserOutlined />,
+  '/system/roles': <TeamOutlined />,
+  '/system/menus': <MenuOutlined />,
+};
+
+const toMenuItems = (items: any[]): any[] =>
+  items
+    .filter((item) => item.path)
+    .map((item) => ({
+      key: item.path,
+      icon: iconMap[item.icon] || routeIconFallback[item.path] || <MenuOutlined />,
+      label: item.name,
+      children: item.children?.length ? toMenuItems(item.children) : undefined,
+    }));
+
+const collectMenuKeys = (items: any[]): Set<string> => {
+  const keys = new Set<string>();
+  const walk = (menuItems: any[]) => {
+    menuItems.forEach((item) => {
+      keys.add(item.key);
+      if (item.children?.length) walk(item.children);
+    });
+  };
+  walk(items);
+  return keys;
+};
+
+const mergeMissingMenuItems = (
+  serverItems: any[],
+  fallbackItems: any[],
+  existingKeys = collectMenuKeys(serverItems),
+): any[] => {
+  const fallbackByKey = new Map(fallbackItems.map((item: any) => [item.key, item]));
+
+  const merged = serverItems.map((item: any) => {
+    const fallback = fallbackByKey.get(item.key);
+    if (!fallback?.children) return item;
+    return {
+      ...item,
+      children: mergeMissingMenuItems(item.children || [], fallback.children, existingKeys),
+    };
+  });
+
+  const mergedKeys = new Set(merged.map((item: any) => item.key));
+  fallbackItems.forEach((item: any) => {
+    if (!mergedKeys.has(item.key) && !existingKeys.has(item.key)) {
+      merged.push(item);
+      existingKeys.add(item.key);
+    }
+  });
+
+  return merged;
+};
+
+const findAncestorKeys = (items: any[], targetKey: string, parents: string[] = []): string[] => {
+  for (const item of items) {
+    if (item.key === targetKey) return parents;
+    if (item.children?.length) {
+      const result = findAncestorKeys(item.children, targetKey, [...parents, item.key]);
+      if (result.length > 0) return result;
+    }
+  }
+  return [];
+};
 
 const AdminLayout: React.FC = () => {
   const navigate = useNavigate();
@@ -57,6 +196,8 @@ const AdminLayout: React.FC = () => {
   const [userName, setUserName] = useState('管理员');
   const [isSuperuser, setIsSuperuser] = useState(false);
   const [permissions, setPermissions] = useState<string[]>([]);
+  const [serverMenuItems, setServerMenuItems] = useState<any[]>([]);
+  const [openKeys, setOpenKeys] = useState<string[]>([]);
 
   useEffect(() => {
     const info = getUserInfo();
@@ -71,13 +212,16 @@ const AdminLayout: React.FC = () => {
       setPermissions(res.data.permissions || []);
       setUserInfo(res.data);
     }).catch(() => {});
+    getVisibleMenuTree()
+      .then((res) => setServerMenuItems(toMenuItems(res.data)))
+      .catch(() => setServerMenuItems([]));
   }, []);
 
   // 根据权限过滤菜单
   const filteredMenuItems = useMemo(() => {
     const hasPermission = (perm: string) => isSuperuser || permissions.includes(perm);
 
-    return allMenuItems
+    const fallbackItems = staticMenuItems
       .filter(item => hasPermission(item.permission))
       .map(item => {
         if (item.children) {
@@ -88,7 +232,22 @@ const AdminLayout: React.FC = () => {
         return item;
       })
       .filter(Boolean);
-  }, [isSuperuser, permissions]);
+
+    if (serverMenuItems.length === 0) {
+      return fallbackItems;
+    }
+
+    return mergeMissingMenuItems(serverMenuItems, fallbackItems);
+  }, [isSuperuser, permissions, serverMenuItems]);
+
+  useEffect(() => {
+    if (collapsed) {
+      setOpenKeys([]);
+      return;
+    }
+    const ancestors = findAncestorKeys(filteredMenuItems, location.pathname);
+    setOpenKeys((current) => Array.from(new Set([...current, ...ancestors])));
+  }, [collapsed, filteredMenuItems, location.pathname]);
 
   const handleLogout = () => {
     removeToken();
@@ -100,7 +259,7 @@ const AdminLayout: React.FC = () => {
   ];
 
   return (
-    <Layout style={{ minHeight: '100dvh' }}>
+    <Layout className="admin-shell">
       <Sider
         trigger={null}
         collapsible
@@ -126,7 +285,8 @@ const AdminLayout: React.FC = () => {
           theme="dark"
           mode="inline"
           selectedKeys={[location.pathname]}
-          defaultOpenKeys={collapsed ? [] : ['/system']}
+          openKeys={openKeys}
+          onOpenChange={(keys) => setOpenKeys(keys as string[])}
           items={filteredMenuItems}
           onClick={({ key }) => navigate(key)}
           style={{
@@ -137,54 +297,21 @@ const AdminLayout: React.FC = () => {
         />
       </Sider>
 
-      <Layout style={{ marginLeft: collapsed ? 64 : 220, transition: 'margin-left 0.2s ease' }}>
-        <Header style={{
-          height: 56,
-          lineHeight: '56px',
-          padding: '0 28px',
-          background: '#fff',
-          borderBottom: '1px solid #eae8e4',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          position: 'sticky',
-          top: 0,
-          zIndex: 50,
-        }}>
+      <Layout className="admin-layout" style={{ marginLeft: collapsed ? 64 : 220 }}>
+        <Header className="admin-header">
           <button
             onClick={() => setCollapsed(!collapsed)}
-            style={{
-              border: 'none',
-              background: 'none',
-              cursor: 'pointer',
-              fontSize: 16,
-              color: '#6b6560',
-              padding: '6px 8px',
-              borderRadius: 6,
-              display: 'flex',
-              alignItems: 'center',
-            }}
-            onMouseEnter={e => (e.currentTarget.style.background = '#f4f3f1')}
-            onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+            className="icon-button-plain"
           >
             {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
           </button>
 
           <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
-            <Space
-              style={{
-                cursor: 'pointer',
-                padding: '4px 12px 4px 4px',
-                borderRadius: 20,
-                transition: 'background 0.2s',
-              }}
-              onMouseEnter={e => (e.currentTarget.style.background = '#f4f3f1')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-            >
+            <Space className="user-trigger">
               <Avatar
                 size={30}
                 style={{
-                  background: '#e8653a',
+                  background: '#3f6f8f',
                   fontSize: 13,
                   fontWeight: 600,
                 }}
@@ -193,18 +320,14 @@ const AdminLayout: React.FC = () => {
               </Avatar>
               <Text style={{
                 fontSize: 13,
-                fontWeight: 500,
-                color: '#1a1a1a',
+                fontWeight: 600,
+                color: '#202a34',
               }}>{userName}</Text>
             </Space>
           </Dropdown>
         </Header>
 
-        <Content style={{
-          padding: '28px 28px 40px',
-          minHeight: 'calc(100dvh - 56px)',
-          background: '#f4f3f1',
-        }}>
+        <Content className="admin-content">
           <Outlet />
         </Content>
       </Layout>

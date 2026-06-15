@@ -23,35 +23,9 @@ const LoginPage: React.FC = () => {
   };
 
   return (
-    <div style={{
-      minHeight: '100dvh',
-      display: 'grid',
-      gridTemplateColumns: '1fr 420px',
-      background: '#f4f3f1',
-    }}>
-      {/* Left panel — brand area */}
-      <div style={{
-        background: '#1c1b19',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        padding: '48px 56px',
-        position: 'relative',
-        overflow: 'hidden',
-      }}>
-        {/* Subtle radial glow */}
-        <div style={{
-          position: 'absolute',
-          width: 500,
-          height: 500,
-          borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(232,101,58,0.12) 0%, transparent 70%)',
-          bottom: -120,
-          right: -80,
-          pointerEvents: 'none',
-        }} />
-
-        <div>
+    <div className="login-shell">
+      <div className="login-brand-panel">
+        <div className="login-brand-content">
           <div style={{
             display: 'flex',
             alignItems: 'center',
@@ -62,7 +36,7 @@ const LoginPage: React.FC = () => {
               width: 32,
               height: 32,
               borderRadius: 8,
-              background: '#e8653a',
+              background: '#3f6f8f',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -74,48 +48,33 @@ const LoginPage: React.FC = () => {
               fontSize: 16,
               fontWeight: 600,
               color: 'rgba(255,255,255,0.9)',
-              letterSpacing: '-0.01em',
+              letterSpacing: 0,
             }}>RAG System</span>
           </div>
 
-          <h1 style={{
-            fontSize: 36,
-            fontWeight: 700,
-            lineHeight: 1.2,
-            letterSpacing: '-0.03em',
-            color: '#fff',
-            margin: 0,
-          }}>
+          <h1 className="login-title">
             知识库<br />管理平台
           </h1>
-          <p style={{
-            fontSize: 15,
-            lineHeight: 1.7,
-            color: 'rgba(255,255,255,0.45)',
-            marginTop: 20,
-            maxWidth: 340,
-          }}>
-            基于向量检索与 RAG 技术的企业级知识管理解决方案。支持多种文档格式、智能分块策略与多领域专业问答。
+          <p className="login-copy">
+            管理文档、分块策略、模型连接和领域提示词，让团队用同一个知识底座回答复杂问题。
           </p>
         </div>
 
-        <div style={{
+        <div className="login-metrics" style={{
           display: 'flex',
           gap: 32,
-          position: 'relative',
-          zIndex: 1,
         }}>
           {[
             { label: '向量引擎', value: 'Milvus' },
             { label: 'Embedding', value: 'Qwen3' },
-            { label: '分块策略', value: '4种' },
+            { label: '分块策略', value: '5种' },
           ].map((item) => (
             <div key={item.label}>
               <div style={{
                 fontSize: 22,
-                fontWeight: 700,
-                color: '#fff',
-                letterSpacing: '-0.02em',
+                fontWeight: 760,
+                color: '#f8fbfd',
+                letterSpacing: 0,
                 fontVariantNumeric: 'tabular-nums',
               }}>{item.value}</div>
               <div style={{
@@ -131,24 +90,18 @@ const LoginPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Right panel — login form */}
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        padding: '48px 48px',
-      }}>
+      <div className="login-form-panel">
         <div style={{ marginBottom: 40 }}>
           <h2 style={{
-            fontSize: 24,
-            fontWeight: 700,
-            letterSpacing: '-0.02em',
-            color: '#1a1a1a',
+            fontSize: 28,
+            fontWeight: 760,
+            letterSpacing: 0,
+            color: '#202a34',
             margin: 0,
           }}>登录</h2>
           <p style={{
             fontSize: 14,
-            color: '#8a8580',
+            color: '#7d8a96',
             marginTop: 8,
           }}>输入你的账号以继续</p>
         </div>
@@ -161,7 +114,7 @@ const LoginPage: React.FC = () => {
         >
           <Form.Item
             name="username"
-            label={<span style={{ fontWeight: 500, fontSize: 13, color: '#6b6560' }}>用户名</span>}
+            label={<span style={{ fontWeight: 600, fontSize: 13, color: '#667482' }}>用户名</span>}
             rules={[{ required: true, message: '请输入用户名' }]}
           >
             <Input
@@ -171,7 +124,7 @@ const LoginPage: React.FC = () => {
           </Form.Item>
           <Form.Item
             name="password"
-            label={<span style={{ fontWeight: 500, fontSize: 13, color: '#6b6560' }}>密码</span>}
+            label={<span style={{ fontWeight: 600, fontSize: 13, color: '#667482' }}>密码</span>}
             rules={[{ required: true, message: '请输入密码' }]}
             style={{ marginBottom: 32 }}
           >
@@ -201,7 +154,7 @@ const LoginPage: React.FC = () => {
         <div style={{
           marginTop: 40,
           fontSize: 12,
-          color: '#a09a94',
+          color: '#96a2ae',
           textAlign: 'center',
         }}>
           默认账号 admin / admin123
