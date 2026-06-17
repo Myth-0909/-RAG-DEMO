@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { ConfigProvider } from 'antd';
+import { ConfigProvider, App as AntdApp } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import './global.css';
 import AdminLayout from '@/layouts/AdminLayout';
@@ -84,7 +84,8 @@ const App: React.FC = () => {
         },
       }}
     >
-      <BrowserRouter>
+      <AntdApp>
+        <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route
@@ -108,6 +109,7 @@ const App: React.FC = () => {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
+      </AntdApp>
     </ConfigProvider>
   );
 };

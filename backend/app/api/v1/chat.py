@@ -111,7 +111,8 @@ async def chat_query(
         top_k=request.top_k,
         db=db,
         chat_history=history_messages,
-        memory_context=memory_context
+        memory_context=memory_context,
+        search_mode=getattr(request, "search_mode", "hybrid"),
     )
 
     # 保存助手消息
@@ -180,7 +181,8 @@ async def chat_stream(
             top_k=request.top_k,
             db=db,
             chat_history=history_messages,
-            memory_context=memory_context
+            memory_context=memory_context,
+            search_mode=getattr(request, "search_mode", "hybrid"),
         ):
             if event["type"] == "token":
                 full_answer.append(event["data"]["content"])

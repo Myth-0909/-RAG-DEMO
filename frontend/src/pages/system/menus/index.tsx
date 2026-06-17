@@ -420,7 +420,7 @@ const MenuManagementPage: React.FC = () => {
         onOk={() => form.submit()}
         okText={editingMenu ? '保存' : '创建'}
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
         width={560}
       >
         <Form form={form} onFinish={handleSubmit} layout="vertical" style={{ marginTop: 20 }}>

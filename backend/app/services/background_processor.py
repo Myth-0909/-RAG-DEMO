@@ -1,23 +1,35 @@
 import asyncio
 import logging
+import time
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import OperationalError
 
+from app.database import SessionLocal as _SessionLocal
 from app.config import settings
 from app.models.processing_task import ProcessingTask
 from app.services.document import process_document_stream
 
 logger = logging.getLogger(__name__)
 
-connect_args = {}
-if settings.DATABASE_URL.startswith("sqlite"):
-    connect_args["check_same_thread"] = False
+_MAX_DB_RETRIES = 5
+_DB_RETRY_DELAY = 1.0  # seconds
 
-_engine = create_engine(settings.DATABASE_URL, connect_args=connect_args)
-_SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
+
+def _safe_commit(db, context: str = ""):
+    """Commit with retry on transient SQLite lock errors."""
+    for attempt in range(_MAX_DB_RETRIES):
+        try:
+            db.commit()
+            return
+        except OperationalError as e:
+            if "database is locked" in str(e) and attempt < _MAX_DB_RETRIES - 1:
+                logger.debug(f"DB locked during {context}, retry {attempt + 1}/{_MAX_DB_RETRIES}")
+                time.sleep(_DB_RETRY_DELAY)
+                db.rollback()  # Reset transaction state before retry
+                continue
+            raise
 
 STEP_LABELS = {
     "convert": "文档转换",
@@ -26,6 +38,7 @@ STEP_LABELS = {
     "apply": "执行清洗",
     "analyze": "内容分析",
     "chunk": "智能分块",
+    "refine": "分块精炼",
     "embed": "向量化存储",
     "complete": "处理完成",
     "error": "处理错误",
@@ -47,7 +60,7 @@ async def run_background_processing(
 
         task.status = "processing"
         task.current_step = "convert"
-        db.commit()
+        _safe_commit(db, f"step={task.current_step}")
 
         collected_events = []
 
@@ -69,7 +82,7 @@ async def run_background_processing(
 
             task.current_step = step if status != "done" else step
             task.events = list(collected_events)
-            db.commit()
+            _safe_commit(db, f"step={task.current_step}")
 
         task = db.query(ProcessingTask).filter(ProcessingTask.id == task_id).first()
         if task:
@@ -84,7 +97,7 @@ async def run_background_processing(
                 task.status = "completed"
             task.current_step = "complete" if task.status == "completed" else "error"
             task.events = collected_events
-            db.commit()
+            _safe_commit(db, f"step={task.current_step}")
 
         logger.info(f"Background processing completed for task {task_id}, doc {doc_id}")
 
@@ -96,7 +109,7 @@ async def run_background_processing(
                 task.status = "failed"
                 task.error_message = str(e)[:500]
                 task.current_step = "error"
-                db.commit()
+                _safe_commit(db, f"step={task.current_step}")
         except Exception:
             pass
     finally:

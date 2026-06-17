@@ -38,13 +38,20 @@ _RETRY_DELAY = 3.0
 
 
 def get_llm_client() -> OpenAI:
-    """Create a new client per request to respect dynamic config changes."""
+    """Create a new client per request to respect dynamic config changes.
+
+    Uses trust_env=False to bypass system HTTP_PROXY settings, which would
+    otherwise route internal-network requests through an external proxy and
+    cause 502 errors.
+    """
     cfg = get_current_llm_config()
+    http_client = httpx.Client(transport=httpx.HTTPTransport(trust_env=False))
     return OpenAI(
         base_url=cfg.base_url,
         api_key=cfg.api_key,
         timeout=_LLM_TIMEOUT,
         max_retries=0,
+        http_client=http_client,
     )
 
 

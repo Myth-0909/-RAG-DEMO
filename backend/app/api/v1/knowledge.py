@@ -104,6 +104,15 @@ def delete_knowledge_base(
     milvus = MilvusService()
     milvus.drop_collection(f"kb_{kb.id}")
 
+    try:
+        from app.services.bm25_service import BM25Service
+        bm25 = BM25Service(db)
+        bm25.delete_by_knowledge_base(kb_id)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"FTS5 删除知识库索引失败 (kb_id={kb_id}): {e}")
+
     db.delete(kb)
     db.commit()
     return {"detail": "删除成功"}
@@ -175,7 +184,10 @@ async def upload_document(
         metadata=metadata or {},
     )
 
-    return doc
+    return {
+        **DocumentResponse.model_validate(doc).model_dump(),
+        "task_id": task.id,
+    }
 
 
 @router.get("/{kb_id}/documents/{doc_id}/process-stream")
@@ -277,6 +289,13 @@ def delete_document(
     except Exception as e:
         logger.warning(f"Milvus 删除向量数据失败 (doc_id={doc_id}): {e}")
 
+    try:
+        from app.services.bm25_service import BM25Service
+        bm25 = BM25Service(db)
+        bm25.delete_by_document(doc_id)
+    except Exception as e:
+        logger.warning(f"FTS5 删除索引失败 (doc_id={doc_id}): {e}")
+
     file_path = os.path.join("uploads", doc.filename)
     if os.path.exists(file_path):
         try:
@@ -298,3 +317,45 @@ def list_chunks(
 ):
     chunks = db.query(DocumentChunk).filter(DocumentChunk.document_id == doc_id).all()
     return chunks
+
+
+@router.post("/rebuild-fts")
+def rebuild_fts_index(
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """手动重建 FTS5 BM25 全文索引"""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        from app.services.bm25_service import BM25Service
+        bm25 = BM25Service(db)
+
+        # Check existing state
+        from app.models.knowledge import DocumentChunk
+        total_chunks = db.query(DocumentChunk).count()
+        indexed = bm25.chunk_count()
+
+        def progress_cb(processed, total):
+            logger.info(f"FTS5 rebuild progress: {processed}/{total}")
+
+        bm25.rebuild_index(progress_callback=progress_cb)
+        db.commit()
+
+        return {
+            "detail": "FTS5 索引重建成功",
+            "total_chunks": total_chunks,
+            "indexed_before": indexed,
+        }
+    except ImportError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"jieba 未安装，无法重建 FTS5 索引: {e}",
+        )
+    except Exception as e:
+        logger.error(f"FTS5 rebuild failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"FTS5 索引重建失败: {e}",
+        )

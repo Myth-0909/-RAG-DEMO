@@ -168,7 +168,7 @@ const UserPage: React.FC = () => {
         onOk={() => form.submit()}
         okText={editingId ? '保存' : '创建'}
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} onFinish={handleSubmit} layout="vertical" style={{ marginTop: 20 }}>
           <Form.Item name="username" label="用户名" rules={[{ required: !editingId }]}>

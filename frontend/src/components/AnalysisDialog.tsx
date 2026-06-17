@@ -269,7 +269,7 @@ const AnalysisDialog: React.FC<AnalysisDialogProps> = ({ open, onClose, doc }) =
       width={520}
       className="analysis-dialog"
       closable={true}
-      destroyOnClose
+      destroyOnHidden
     >
       <div className="analysis-dialog-header">
         <ThunderboltOutlined style={{ color: '#3f6f8f', fontSize: 18 }} />

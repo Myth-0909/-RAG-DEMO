@@ -41,6 +41,7 @@ const ChatPage: React.FC = () => {
   const [sourceDetail, setSourceDetail] = useState<any>(null);
   const [sourceDrawerOpen, setSourceDrawerOpen] = useState(false);
   const [conversationLoading, setConversationLoading] = useState(false);
+  const [searchMode, setSearchMode] = useState<string>('hybrid');
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<any>(null);
 
@@ -146,6 +147,7 @@ const ChatPage: React.FC = () => {
         conversation_id: currentConversationId,
         domain_id: selectedDomain,
         top_k: 5,
+        search_mode: searchMode,
       });
 
       // 更新当前对话 ID
@@ -271,6 +273,18 @@ const ChatPage: React.FC = () => {
             onChange={setSelectedDomain}
             allowClear
             options={domains.map(d => ({ label: d.name, value: d.id }))}
+          />
+          <div style={{ width: 1, height: 24, background: '#d9e1e8' }} />
+          <span style={{ fontSize: 12, color: '#667482', fontWeight: 700 }}>检索</span>
+          <Select
+            style={{ width: 130 }}
+            value={searchMode}
+            onChange={setSearchMode}
+            options={[
+              { label: '混合检索', value: 'hybrid' },
+              { label: '向量检索', value: 'vector' },
+              { label: '关键词检索', value: 'keyword' },
+            ]}
           />
         </div>
 

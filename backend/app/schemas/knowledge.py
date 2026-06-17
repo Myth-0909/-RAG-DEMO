@@ -41,6 +41,7 @@ class DocumentResponse(BaseModel):
     chunk_count: int
     metadata_json: Optional[Dict[str, Any]] = None
     error_message: Optional[str] = None
+    task_id: Optional[int] = None
     created_at: Optional[datetime] = None
 
     class Config:
@@ -106,6 +107,7 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[int] = None
     domain_id: Optional[int] = None
     top_k: int = 5
+    search_mode: str = "hybrid"  # "vector", "keyword", or "hybrid"
 
 
 class ChatSource(BaseModel):

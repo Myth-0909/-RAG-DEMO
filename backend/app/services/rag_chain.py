@@ -6,15 +6,25 @@ from app.services.model_config_service import get_current_llm_config
 from app.models.knowledge import KnowledgeBase, Document, Domain
 from app.config import settings
 from openai import OpenAI
+import httpx
 import logging
 
 logger = logging.getLogger(__name__)
 
+# RRF (Reciprocal Rank Fusion) constant
+RRF_K = 60
+
 
 def get_llm_client():
-    """Get LLM client using current active config (DB or .env fallback)."""
+    """Get LLM client using current active config (DB or .env fallback).
+
+    Uses trust_env=False to bypass system HTTP_PROXY settings, which would
+    otherwise route internal-network requests through an external proxy and
+    cause 502 errors.
+    """
     cfg = get_current_llm_config()
-    return OpenAI(base_url=cfg.base_url, api_key=cfg.api_key)
+    http_client = httpx.Client(transport=httpx.HTTPTransport(trust_env=False))
+    return OpenAI(base_url=cfg.base_url, api_key=cfg.api_key, http_client=http_client)
 
 
 def get_current_model_name() -> str:
@@ -22,31 +32,151 @@ def get_current_model_name() -> str:
     return cfg.model_name
 
 
+def _rrf_merge(
+    vector_results: List[Dict[str, Any]],
+    bm25_results: List[Dict[str, Any]],
+    k: int = RRF_K,
+    top_k: int = 5,
+) -> List[Dict[str, Any]]:
+    """
+    Merge two ranked lists using Reciprocal Rank Fusion.
+
+    score(d) = sum_{r in rankings} 1 / (k + rank_r(d))
+
+    Uses (document_id, chunk_index) as the unique key to match chunks
+    across the two search methods, since they use different ID systems.
+    """
+    if not vector_results:
+        return bm25_results[:top_k]
+    if not bm25_results:
+        return vector_results[:top_k]
+
+    def _make_key(hit: Dict) -> str:
+        return f"{hit.get('document_id', 0)}:{hit.get('chunk_index', 0)}"
+
+    # Build rank maps: key -> rank position (1-indexed)
+    vector_ranks = {}
+    id_to_item = {}
+    for i, r in enumerate(vector_results):
+        key = _make_key(r)
+        vector_ranks[key] = i + 1
+        id_to_item[key] = r
+
+    bm25_ranks = {}
+    for i, r in enumerate(bm25_results):
+        key = _make_key(r)
+        bm25_ranks[key] = i + 1
+        if key not in id_to_item:
+            id_to_item[key] = r
+
+    # Default rank for missing items
+    v_default = len(vector_results) + 1
+    b_default = len(bm25_results) + 1
+
+    all_keys = set(vector_ranks.keys()) | set(bm25_ranks.keys())
+
+    scored = []
+    for key in all_keys:
+        rrf = (
+            1.0 / (k + vector_ranks.get(key, v_default))
+            + 1.0 / (k + bm25_ranks.get(key, b_default))
+        )
+        scored.append((key, rrf))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+
+    merged = []
+    for key, rrf_score in scored[:top_k]:
+        item = dict(id_to_item[key])
+        item["score"] = round(rrf_score, 4)
+        merged.append(item)
+
+    return merged
+
+
 def retrieve_context(
     question: str,
     knowledge_base_ids: List[int],
     top_k: int = 5,
+    search_mode: str = "hybrid",
+    db: Optional[Session] = None,
 ) -> List[Dict[str, Any]]:
-    query_embedding = embed_query(question)
-    milvus = MilvusService()
-    all_hits = []
+    """Retrieve context from knowledge bases using the specified search mode.
 
-    for kb_id in knowledge_base_ids:
-        collection_name = f"kb_{kb_id}"
+    Args:
+        question: User's question.
+        knowledge_base_ids: List of KB IDs to search across.
+        top_k: Number of top results to return.
+        search_mode: "vector", "keyword", or "hybrid" (default).
+        db: SQLAlchemy Session (required for keyword/hybrid modes).
+
+    Returns:
+        List of hit dicts with keys matching MilvusService.search().
+    """
+    valid_modes = ("vector", "keyword", "hybrid")
+    if search_mode not in valid_modes:
+        logger.warning(f"Invalid search_mode '{search_mode}', falling back to hybrid")
+        search_mode = "hybrid"
+
+    # ── Vector search ─────────────────────────────────────────────────
+    def _vector_search(k: int) -> List[Dict]:
+        query_embedding = embed_query(question)
+        milvus = MilvusService()
+        all_hits = []
+        for kb_id in knowledge_base_ids:
+            collection_name = f"kb_{kb_id}"
+            try:
+                hits = milvus.search(
+                    collection_name=collection_name,
+                    query_embedding=query_embedding,
+                    top_k=k,
+                )
+                for hit in hits:
+                    hit["knowledge_base_id"] = kb_id
+                all_hits.extend(hits)
+            except Exception as e:
+                logger.warning(f"Vector search failed for {collection_name}: {e}")
+        all_hits.sort(key=lambda x: x["score"], reverse=True)
+        return all_hits[:k]
+
+    # ── BM25 search ───────────────────────────────────────────────────
+    def _bm25_search(k: int) -> List[Dict]:
         try:
-            hits = milvus.search(
-                collection_name=collection_name,
-                query_embedding=query_embedding,
-                top_k=top_k,
-            )
-            for hit in hits:
-                hit["knowledge_base_id"] = kb_id
-            all_hits.extend(hits)
+            from app.services.bm25_service import BM25Service
+            bm25 = BM25Service(db)
+            return bm25.search(question, knowledge_base_ids, top_k=k)
         except Exception as e:
-            logger.warning(f"Search failed for collection {collection_name}: {e}")
+            logger.warning(f"BM25 search failed: {e}")
+            return []
 
-    all_hits.sort(key=lambda x: x["score"], reverse=True)
-    return all_hits[:top_k]
+    # ── Route by mode ─────────────────────────────────────────────────
+    if search_mode == "vector":
+        return _vector_search(top_k)
+
+    if search_mode == "keyword":
+        if db is None:
+            logger.warning("keyword mode requires db session, falling back to vector")
+            return _vector_search(top_k)
+        bm25_results = _bm25_search(top_k)
+        if not bm25_results:
+            logger.info("BM25 returned no results, falling back to vector search")
+            return _vector_search(top_k)
+        return bm25_results
+
+    # search_mode == "hybrid"
+    if db is None:
+        logger.warning("hybrid mode requires db session, falling back to vector-only")
+        return _vector_search(top_k)
+
+    # Oversample each method and merge with RRF
+    oversample_k = top_k * 3
+    vector_results = _vector_search(oversample_k)
+    bm25_results = _bm25_search(oversample_k)
+
+    if not bm25_results:
+        return vector_results[:top_k]
+
+    return _rrf_merge(vector_results, bm25_results, k=RRF_K, top_k=top_k)
 
 
 def build_context_text(hits: List[Dict[str, Any]]) -> str:
@@ -100,9 +230,13 @@ async def rag_query(
     db: Session = None,
     chat_history: List[Dict[str, str]] = None,
     memory_context: str = "",
+    search_mode: str = "hybrid",
 ) -> Dict[str, Any]:
     # 检索知识库上下文
-    kb_context = retrieve_context(question, knowledge_base_ids, top_k)
+    kb_context = retrieve_context(
+        question, knowledge_base_ids, top_k,
+        search_mode=search_mode, db=db,
+    )
     kb_context_text = build_context_text(kb_context)
 
     # 构建系统提示
@@ -173,8 +307,12 @@ async def rag_query_stream(
     db: Session = None,
     chat_history: List[Dict[str, str]] = None,
     memory_context: str = "",
+    search_mode: str = "hybrid",
 ) -> AsyncGenerator[Dict[str, Any], None]:
-    hits = retrieve_context(question, knowledge_base_ids, top_k)
+    hits = retrieve_context(
+        question, knowledge_base_ids, top_k,
+        search_mode=search_mode, db=db,
+    )
     context = build_context_text(hits)
     system_prompt = build_system_prompt(domain_id, chat_history)
 

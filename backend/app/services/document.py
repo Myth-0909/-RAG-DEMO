@@ -4,9 +4,7 @@ import json
 import logging
 from typing import AsyncGenerator, Dict, Any, Optional
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
+from app.database import SessionLocal as _SessionLocal
 from app.config import settings
 from app.models.knowledge import Document, DocumentChunk
 from app.services.chunking import chunk_text
@@ -19,13 +17,6 @@ from app.services.llm_analyzer import (
 )
 
 logger = logging.getLogger(__name__)
-
-connect_args = {}
-if settings.DATABASE_URL.startswith("sqlite"):
-    connect_args["check_same_thread"] = False
-
-_engine = create_engine(settings.DATABASE_URL, connect_args=connect_args)
-_SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
 
 
 # ── OCR / Table helpers (unchanged) ──────────────────────────────────────────
@@ -446,8 +437,15 @@ async def process_document_stream(
         })
 
         # ── Step 5.5: LLM chunk refinement ────────────────────────────────
+        refine_batch_size = 15
+        refine_total_batches = (len(chunks) + refine_batch_size - 1) // refine_batch_size
+
         yield _event("refine", "thinking", {
-            "message": f"LLM 正在审核并精炼 {len(chunks)} 个分块...",
+            "message": f"LLM 正在审核并精炼 {len(chunks)} 个分块（共 {refine_total_batches} 批）...",
+            "batch": 0,
+            "total_batches": refine_total_batches,
+            "processed": 0,
+            "total": len(chunks),
         })
 
         refine_queue: asyncio.Queue = asyncio.Queue()
@@ -471,11 +469,49 @@ async def process_document_stream(
 
         refine_task = loop.run_in_executor(None, _run_refine)
 
+        import re as _re
+        _refine_current_batch = 0
         while True:
             token = await refine_queue.get()
             if token is None:
                 break
+            # Always emit the streaming token (may be filtered by background processor)
             yield _event("refine", "thinking", {"token": token})
+
+            # Also emit persistable progress events (no "token" key → persisted by background processor)
+            _batch_start = _re.search(r'📦 批次 (\d+)/(\d+)', token)
+            if _batch_start:
+                _refine_current_batch = int(_batch_start.group(1))
+                _total_b = int(_batch_start.group(2))
+                # Estimate processed: each batch has ~refine_batch_size chunks
+                _est_processed = min((_refine_current_batch - 1) * refine_batch_size, len(chunks))
+                yield _event("refine", "thinking", {
+                    "message": f"正在精炼第 {_refine_current_batch}/{_total_b} 批分块...",
+                    "batch": _refine_current_batch,
+                    "total_batches": _total_b,
+                    "processed": _est_processed,
+                    "total": len(chunks),
+                })
+            elif '✅ 批次' in token:
+                _done_match = _re.search(r'✅ 批次 (\d+)', token)
+                if _done_match:
+                    _done_batch = int(_done_match.group(1))
+                    _est_processed = min(_done_batch * refine_batch_size, len(chunks))
+                    yield _event("refine", "thinking", {
+                        "message": f"第 {_done_batch}/{refine_total_batches} 批精炼完成",
+                        "batch": _done_batch,
+                        "total_batches": refine_total_batches,
+                        "processed": _est_processed,
+                        "total": len(chunks),
+                    })
+            elif '⚠' in token and '精炼失败' in token:
+                # Surface partial failures as progress events
+                yield _event("refine", "thinking", {
+                    "message": token.replace('\n', ' ').strip(),
+                    "batch": _refine_current_batch,
+                    "total_batches": refine_total_batches,
+                    "warning": True,
+                })
 
         refined = await refine_task
 
@@ -492,45 +528,81 @@ async def process_document_stream(
             })
 
         # ── Step 6: Embed and store in Milvus ─────────────────────────────
+        batch_size = 50
+        total_chunks = len(chunks)
+        total_batches = (total_chunks + batch_size - 1) // batch_size
+
         yield _event("embed", "thinking", {
-            "message": f"正在向量化 {len(chunks)} 个分块并存入 Milvus...",
+            "message": f"正在向量化 {total_chunks} 个分块并存入 Milvus...",
+            "batch": 0,
+            "total_batches": total_batches,
+            "processed": 0,
+            "total": total_chunks,
         })
 
         collection_name = f"kb_{doc.knowledge_base_id}"
         milvus = MilvusService()
         milvus.create_collection(collection_name)
-
-        batch_size = 50
         all_milvus_ids = []
 
         for i in range(0, len(chunks), batch_size):
             batch = chunks[i:i + batch_size]
             texts = [c.text for c in batch]
 
-            embeddings = await loop.run_in_executor(None, embed_texts, texts)
+            batch_num = (i // batch_size) + 1
+            processed_before = min(i, total_chunks)
 
-            milvus_ids = milvus.insert(
-                collection_name=collection_name,
-                embeddings=embeddings,
-                chunk_texts=texts,
-                parent_texts=[c.parent_text for c in batch],
-                metadata_list=[c.metadata for c in batch],
-                document_ids=[doc_id] * len(batch),
-                chunk_indices=[c.chunk_index for c in batch],
-            )
-            all_milvus_ids.extend(milvus_ids)
+            try:
+                embeddings = await loop.run_in_executor(None, embed_texts, texts)
 
-            for j, chunk in enumerate(batch):
-                db_chunk = DocumentChunk(
-                    document_id=doc_id,
-                    chunk_index=chunk.chunk_index,
-                    chunk_text=chunk.text,
-                    parent_text=chunk.parent_text,
-                    metadata_json=chunk.metadata,
-                    milvus_id=str(all_milvus_ids[i + j]) if i + j < len(all_milvus_ids) else None,
-                    token_count=len(chunk.text),
+                milvus_ids = milvus.insert(
+                    collection_name=collection_name,
+                    embeddings=embeddings,
+                    chunk_texts=texts,
+                    parent_texts=[c.parent_text for c in batch],
+                    metadata_list=[c.metadata for c in batch],
+                    document_ids=[doc_id] * len(batch),
+                    chunk_indices=[c.chunk_index for c in batch],
                 )
-                db.add(db_chunk)
+                all_milvus_ids.extend(milvus_ids)
+
+                for j, chunk in enumerate(batch):
+                    db_chunk = DocumentChunk(
+                        document_id=doc_id,
+                        chunk_index=chunk.chunk_index,
+                        chunk_text=chunk.text,
+                        parent_text=chunk.parent_text,
+                        metadata_json=chunk.metadata,
+                        milvus_id=str(all_milvus_ids[i + j]) if i + j < len(all_milvus_ids) else None,
+                        token_count=len(chunk.text),
+                    )
+                    db.add(db_chunk)
+
+                # Commit each batch immediately to avoid long-held write locks
+                # that would conflict with the background processor's commits.
+                db.commit()
+
+                processed = min(i + batch_size, total_chunks)
+                yield _event("embed", "thinking", {
+                    "message": f"正在向量化 第 {batch_num}/{total_batches} 批 (已处理 {processed}/{total_chunks} 个分块)...",
+                    "batch": batch_num,
+                    "total_batches": total_batches,
+                    "processed": processed,
+                    "total": total_chunks,
+                })
+            except Exception as batch_error:
+                logger.error(
+                    f"Embed batch {batch_num}/{total_batches} failed for doc {doc_id}: {batch_error}"
+                )
+                yield _event("embed", "thinking", {
+                    "message": f"第 {batch_num}/{total_batches} 批向量化失败: {str(batch_error)[:200]}",
+                    "batch": batch_num,
+                    "total_batches": total_batches,
+                    "processed": processed_before,
+                    "total": total_chunks,
+                    "warning": True,
+                })
+                # Continue with next batch — don't lose all progress
 
         yield _event("embed", "done", {
             "chunks_embedded": len(chunks),
@@ -571,6 +643,29 @@ async def process_document_stream(
             },
         }
         db.commit()
+
+        # ── Sync chunks to FTS5 BM25 index ─────────────────────────────
+        try:
+            from app.services.bm25_service import BM25Service
+            bm25 = BM25Service(db)
+            # Fetch the newly created chunk IDs for this document
+            new_chunks = (
+                db.query(DocumentChunk)
+                .filter(DocumentChunk.document_id == doc_id)
+                .all()
+            )
+            bm25.index_chunks_batch([
+                (nc.id, nc.chunk_text)
+                for nc in new_chunks
+                if nc.chunk_text
+            ])
+            logger.info(
+                f"FTS5: indexed {len(new_chunks)} chunks for document {doc_id}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"FTS5 indexing failed for document {doc_id} (non-fatal): {e}"
+            )
 
         yield _event("complete", "done", {
             "chunk_count": len(chunks),

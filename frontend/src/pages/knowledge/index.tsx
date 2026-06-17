@@ -1,19 +1,21 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   Table, Button, Modal, Form, Input, Select, Space, Tag, Upload,
-  message, Popconfirm, Drawer, List, Badge, Tooltip, Divider,
+  App, Popconfirm, Drawer, List, Badge, Tooltip, Divider,
 } from 'antd';
 import {
   PlusOutlined, UploadOutlined, DeleteOutlined, FileTextOutlined,
   EyeOutlined, ReloadOutlined, DatabaseOutlined, FileOutlined,
-  AppstoreOutlined, ThunderboltOutlined,
+  AppstoreOutlined, ThunderboltOutlined, LoadingOutlined,
 } from '@ant-design/icons';
 import {
   getKnowledgeBases, createKnowledgeBase, deleteKnowledgeBase,
   getDocuments, uploadDocument, deleteDocument, getChunks, getDomains,
+  getProcessingTasks,
 } from '@/services/api';
 import { getUserInfo } from '@/utils/auth';
 import AnalysisDialog from '@/components/AnalysisDialog';
+import ProcessAnalysisDialog from '@/components/ProcessAnalysisDialog';
 import ConvertedTextViewer from '@/components/ConvertedTextViewer';
 
 const { TextArea } = Input;
@@ -34,6 +36,8 @@ const statusConfig: Record<string, { color: string; text: string }> = {
 };
 
 const KnowledgePage: React.FC = () => {
+  const { message } = App.useApp();
+
   const [kbs, setKbs] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -55,7 +59,16 @@ const KnowledgePage: React.FC = () => {
   const [analysisDoc, setAnalysisDoc] = useState<any>(null);
   const [convertedViewerOpen, setConvertedViewerOpen] = useState(false);
   const [convertedDoc, setConvertedDoc] = useState<any>(null);
-  const processedDocIdsRef = useRef<Set<number>>(new Set());
+  // Track which docs have already triggered a completion notification (to avoid duplicates)
+  const notifiedDocIdsRef = useRef<Set<number>>(new Set());
+  // Track last known status to detect transitions even when drawer was closed
+  const lastDocStatusRef = useRef<Map<number, string>>(new Map());
+
+  // Real-time progress dialog state
+  const [progressTaskId, setProgressTaskId] = useState<number | null>(null);
+  const [progressDocId, setProgressDocId] = useState<number | null>(null);
+  const [progressFileName, setProgressFileName] = useState('');
+  const [progressDialogOpen, setProgressDialogOpen] = useState(false);
 
 
   const fetchData = async () => {
@@ -83,16 +96,32 @@ const KnowledgePage: React.FC = () => {
       const newDocs = res.data;
       setDocs(newDocs);
 
-      // Detect newly completed documents and show analysis dialog
+      // Detect status transitions and show completion/failure feedback
       for (const doc of newDocs) {
-        if (doc.status === 'completed' && !processedDocIdsRef.current.has(doc.id)) {
-          processedDocIdsRef.current.add(doc.id);
-          // Only show dialog for docs that have analysis data (just finished processing)
+        const lastStatus = lastDocStatusRef.current.get(doc.id);
+        // Update last known status
+        lastDocStatusRef.current.set(doc.id, doc.status);
+
+        // If doc just transitioned to completed (from non-completed) and not yet notified
+        if (doc.status === 'completed' && lastStatus && lastStatus !== 'completed' && !notifiedDocIdsRef.current.has(doc.id)) {
+          notifiedDocIdsRef.current.add(doc.id);
+          message.success({
+            content: `「${doc.original_filename}」分析完成`,
+            duration: 4,
+          });
           if (doc.metadata_json?.strategy) {
             setAnalysisDoc(doc);
             setAnalysisDialogOpen(true);
-            break; // Show one at a time
+            break; // Show one modal at a time
           }
+        }
+        // If doc just transitioned to failed
+        if (doc.status === 'failed' && lastStatus && lastStatus !== 'failed' && !notifiedDocIdsRef.current.has(doc.id)) {
+          notifiedDocIdsRef.current.add(doc.id);
+          message.error({
+            content: `「${doc.original_filename}」处理失败: ${doc.error_message || '未知错误'}`,
+            duration: 6,
+          });
         }
       }
 
@@ -143,11 +172,12 @@ const KnowledgePage: React.FC = () => {
     setDocDrawerOpen(true);
     const res = await getDocuments(kb.id);
     setDocs(res.data);
-    // Mark existing completed docs so dialog only shows for newly processed ones
+    // Record current statuses as baseline so refreshDocs can detect transitions
+    // (e.g. processing → completed triggers the toast).
+    // Already-completed docs will have lastStatus == 'completed', so no
+    // spurious transition fires.
     for (const doc of res.data) {
-      if (doc.status === 'completed') {
-        processedDocIdsRef.current.add(doc.id);
-      }
+      lastDocStatusRef.current.set(doc.id, doc.status);
     }
   };
 
@@ -158,8 +188,17 @@ const KnowledgePage: React.FC = () => {
     const userInfo = getUserInfo();
     formData.append('metadata_json', JSON.stringify({ author: userInfo?.username || 'unknown' }));
     try {
-      await uploadDocument(selectedKb.id, formData);
-      message.success('已上传，系统正在后台自动分析...');
+      const res = await uploadDocument(selectedKb.id, formData);
+      const doc = res.data;
+      // Open real-time progress dialog if task_id is available
+      if (doc.task_id) {
+        setProgressTaskId(doc.task_id);
+        setProgressDocId(doc.id);
+        setProgressFileName(doc.original_filename);
+        setProgressDialogOpen(true);
+      } else {
+        message.success('已上传，系统正在后台自动分析...');
+      }
       refreshDocs();
     } catch {
       message.error('上传失败');
@@ -315,6 +354,35 @@ const KnowledgePage: React.FC = () => {
       title: '', key: 'action', width: 100,
       render: (_: any, record: any) => (
         <Space size={2}>
+          {(record.status === 'processing' || record.status === 'pending') && (
+            <Tooltip title="查看处理进度">
+              <Button
+                type="text"
+                size="small"
+                icon={<LoadingOutlined />}
+                onClick={async () => {
+                  try {
+                    const tasksRes = await getProcessingTasks();
+                    const tasks = (Array.isArray(tasksRes.data) ? tasksRes.data : []).filter(
+                      (t: any) => t.document_id === record.id,
+                    );
+                    if (tasks.length > 0) {
+                      setProgressTaskId(tasks[0].id);
+                      setProgressDocId(record.id);
+                      setProgressFileName(record.original_filename);
+                      setProgressDialogOpen(true);
+                    } else {
+                      message.info('暂无处理任务记录');
+                    }
+                  } catch {
+                    message.error('获取任务信息失败');
+                  }
+                }}
+                className="action-icon-button"
+                style={{ color: '#3f6f8f' }}
+              />
+            </Tooltip>
+          )}
           {record.status === 'completed' && record.metadata_json?.strategy && (
             <Tooltip title="查看分析">
               <Button
@@ -427,7 +495,7 @@ const KnowledgePage: React.FC = () => {
         onOk={() => form.submit()}
         okText="创建"
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} onFinish={handleCreate} layout="vertical" style={{ marginTop: 20 }}>
           <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
@@ -498,6 +566,22 @@ const KnowledgePage: React.FC = () => {
           }}
         />
       </Drawer>
+
+      {/* Real-time step-by-step progress dialog */}
+      <ProcessAnalysisDialog
+        open={progressDialogOpen}
+        onClose={() => {
+          setProgressDialogOpen(false);
+          refreshDocs(); // Refresh on close to pick up final state
+        }}
+        taskId={progressTaskId}
+        docId={progressDocId}
+        kbId={selectedKb?.id ?? null}
+        fileName={progressFileName}
+        onCompleted={() => {
+          refreshDocs();
+        }}
+      />
 
       {/* Analysis dialog (past results) */}
       <AnalysisDialog

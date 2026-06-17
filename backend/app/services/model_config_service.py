@@ -7,19 +7,10 @@ import logging
 from typing import Optional
 from dataclasses import dataclass
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
+from app.database import SessionLocal as _SessionLocal
 from app.config import settings
 
 logger = logging.getLogger(__name__)
-
-connect_args = {}
-if settings.DATABASE_URL.startswith("sqlite"):
-    connect_args["check_same_thread"] = False
-
-_engine = create_engine(settings.DATABASE_URL, connect_args=connect_args)
-_SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
 
 
 @dataclass

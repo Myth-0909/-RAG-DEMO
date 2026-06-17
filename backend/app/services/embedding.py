@@ -2,17 +2,25 @@ from openai import OpenAI
 from typing import List
 from app.config import settings
 from app.services.model_config_service import get_current_embedding_config
+import httpx
 import logging
 
 logger = logging.getLogger(__name__)
 
 
 def get_embedding_client() -> OpenAI:
-    """动态获取 Embedding 客户端，支持从数据库读取配置"""
+    """动态获取 Embedding 客户端，支持从数据库读取配置
+
+    Uses trust_env=False to bypass system HTTP_PROXY settings, which would
+    otherwise route internal-network requests through an external proxy and
+    cause 502 errors.
+    """
     cfg = get_current_embedding_config()
+    http_client = httpx.Client(transport=httpx.HTTPTransport(trust_env=False))
     return OpenAI(
         base_url=cfg.base_url,
         api_key=cfg.api_key,
+        http_client=http_client,
     )
 
 

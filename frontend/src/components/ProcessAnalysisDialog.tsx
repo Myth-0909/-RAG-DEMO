@@ -7,6 +7,7 @@ import {
   BulbOutlined,
 } from '@ant-design/icons';
 import ConvertedTextViewer from './ConvertedTextViewer';
+import { getProcessingTask } from '@/services/api';
 
 interface ProcessEvent {
   step: string;
@@ -31,8 +32,22 @@ const STEPS_CONFIG = [
   { key: 'apply', title: '执行清洗', icon: <ScissorOutlined /> },
   { key: 'analyze', title: '分块分析', icon: <BulbOutlined /> },
   { key: 'chunk', title: '执行分块', icon: <AppstoreOutlined /> },
+  { key: 'refine', title: '分块精炼', icon: <BulbOutlined /> },
   { key: 'embed', title: '向量化存储', icon: <DatabaseOutlined /> },
 ];
+
+// Stable empty array reference to prevent infinite useEffect re-triggers
+// when the `events` prop defaults to an empty array.
+const EMPTY_EVENTS: ProcessEvent[] = [];
+
+const INITIAL_STEPS: StepState[] = STEPS_CONFIG.map((s) => ({
+  key: s.key,
+  title: s.title,
+  icon: s.icon,
+  status: 'pending' as StepStatus,
+  thinkingTokens: '',
+  result: null,
+}));
 
 const strategyColors: Record<string, string> = {
   recursive: '#3f6f8f',
@@ -48,8 +63,10 @@ interface ProcessAnalysisDialogProps {
   docId: number | null;
   kbId: number | null;
   fileName: string;
-  events: ProcessEvent[];
-  isStreaming: boolean;
+  events?: ProcessEvent[];
+  isStreaming?: boolean;
+  taskId?: number | null;
+  onCompleted?: (result: any) => void;
 }
 
 function StepStatusIcon({ status }: { status: string }) {
@@ -220,7 +237,85 @@ function RenderStepResult({ step, data, onViewConverted }: { step: string; data:
         </div>
       );
 
+    case 'refine':
+      // In-progress: show batch progress bar (same pattern as embed)
+      if (data.batch !== undefined && data.total_batches && data.processed !== undefined && data.total) {
+        const pct = data.total > 0 ? Math.round((data.processed / data.total) * 100) : 0;
+        return (
+          <div className="process-result">
+            <div className="process-result-message">{data.message}</div>
+            <div style={{ marginTop: 10, background: '#e7edf2', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+              <div style={{
+                width: `${pct}%`,
+                height: '100%',
+                background: 'linear-gradient(90deg, #7a678c, #b092d4)',
+                transition: 'width 0.3s ease',
+                borderRadius: 4,
+              }} />
+            </div>
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', marginTop: 4,
+              fontSize: 11, color: '#7d8a96',
+            }}>
+              <span>批次 {data.batch}/{data.total_batches} · {pct}%</span>
+              <span>~{data.processed} / {data.total} 分块</span>
+            </div>
+            {data.warning && (
+              <div style={{ marginTop: 6, fontSize: 11, color: '#b9893a' }}>⚠ {data.message}</div>
+            )}
+          </div>
+        );
+      }
+      // Done: show summary
+      return (
+        <div className="process-result">
+          {data.message ? (
+            <div className="process-result-message">{data.message}</div>
+          ) : (
+            <>
+              <div className="process-result-row">
+                <span className="process-result-label">原始分块数</span>
+                <span className="process-result-value">{data.original_count}</span>
+              </div>
+              <div className="process-result-row">
+                <span className="process-result-label">精炼后分块数</span>
+                <span className="process-result-value">{data.refined_count}</span>
+              </div>
+            </>
+          )}
+        </div>
+      );
+
     case 'embed':
+      // In-progress: show batch progress bar
+      if (data.processed !== undefined && data.total) {
+        const pct = data.total > 0 ? Math.round((data.processed / data.total) * 100) : 0;
+        return (
+          <div className="process-result">
+            <div className="process-result-message">{data.message}</div>
+            <div style={{ marginTop: 10, background: '#e7edf2', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+              <div style={{
+                width: `${pct}%`,
+                height: '100%',
+                background: 'linear-gradient(90deg, #3f6f8f, #547b63)',
+                transition: 'width 0.3s ease',
+                borderRadius: 4,
+              }} />
+            </div>
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', marginTop: 4,
+              fontSize: 11, color: '#7d8a96',
+            }}>
+              <span>{pct}%</span>
+              <span>{data.processed} / {data.total} 分块</span>
+            </div>
+            {data.warning && (
+              <div style={{ marginTop: 6, fontSize: 11, color: '#b9893a' }}>⚠ {data.message}</div>
+            )}
+          </div>
+        );
+      }
+      // Done: show summary
       return (
         <div className="process-result">
           <div className="process-result-row">
@@ -259,49 +354,55 @@ const ProcessAnalysisDialog: React.FC<ProcessAnalysisDialogProps> = ({
   docId,
   kbId,
   fileName,
-  events,
-  isStreaming,
+  events = EMPTY_EVENTS,
+  isStreaming = false,
+  taskId,
+  onCompleted,
 }) => {
   const bodyRef = useRef<HTMLDivElement>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const onCompletedRef = useRef(onCompleted);
+  onCompletedRef.current = onCompleted;  // always fresh without re-triggering effects
 
-  const initialSteps: StepState[] = STEPS_CONFIG.map((s) => ({
-    key: s.key,
-    title: s.title,
-    icon: s.icon,
-    status: 'pending' as StepStatus,
-    thinkingTokens: '',
-    result: null,
-  }));
-
-  const [steps, setSteps] = useState<StepState[]>(initialSteps);
+  const [steps, setSteps] = useState<StepState[]>(INITIAL_STEPS.map(s => ({...s})));
   const [convertedViewerOpen, setConvertedViewerOpen] = useState(false);
+  const [completionResult, setCompletionResult] = useState<ProcessEvent | null>(null);
+  const [errorResult, setErrorResult] = useState<ProcessEvent | null>(null);
 
-  useEffect(() => {
+  // Build steps and terminal events from an events array (shared logic)
+  const buildSteps = (rawEvents: ProcessEvent[]): {
+    steps: StepState[];
+    terminalEvent: ProcessEvent | null;
+    terminalIsError: boolean;
+  } => {
     const newSteps: StepState[] = STEPS_CONFIG.map((s) => ({
       key: s.key,
       title: s.title,
       icon: s.icon,
-      status: 'pending',
+      status: 'pending' as StepStatus,
       thinkingTokens: '',
       result: null,
     }));
 
-    for (const event of events) {
+    let terminalEvent: ProcessEvent | null = null;
+    let terminalIsError = false;
+
+    for (const event of rawEvents) {
       const stepIdx = newSteps.findIndex((s) => s.key === event.step);
       if (stepIdx === -1) {
-        if (event.step === 'error') {
-          const lastActive = [...newSteps].reverse().find((s) => s.status !== 'pending');
-          if (lastActive) {
-            lastActive.status = 'error';
-            lastActive.result = event.data;
-          }
+        if (event.step === 'complete' && event.status === 'done') {
+          terminalEvent = event;
+        }
+        if (event.step === 'error' || event.status === 'error') {
+          terminalEvent = event;
+          terminalIsError = true;
         }
         continue;
       }
 
       const step = newSteps[stepIdx];
       if (event.status === 'thinking') {
-        step.status = 'thinking';
+        if (step.status !== 'done') step.status = 'thinking';
         if (event.data?.token) {
           step.thinkingTokens += event.data.token;
         }
@@ -317,8 +418,66 @@ const ProcessAnalysisDialog: React.FC<ProcessAnalysisDialogProps> = ({
       }
     }
 
+    return { steps: newSteps, terminalEvent, terminalIsError };
+  };
+
+  // Passive mode: events prop drives the display
+  useEffect(() => {
+    const { steps: newSteps, terminalEvent, terminalIsError } = buildSteps(events);
     setSteps(newSteps);
+    if (terminalEvent) {
+      setCompletionResult(terminalIsError ? null : terminalEvent);
+      setErrorResult(terminalIsError ? terminalEvent : null);
+    }
   }, [events]);
+
+  // Active polling mode: taskId drives the display via API polls
+  useEffect(() => {
+    if (!open || !taskId) return;
+
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const res = await getProcessingTask(taskId);
+        if (cancelled) return;
+
+        const task = res.data;
+        const polledEvents: ProcessEvent[] = task.events || [];
+        const { steps: newSteps, terminalEvent, terminalIsError } = buildSteps(polledEvents);
+        setSteps(newSteps);
+        if (terminalEvent) {
+          setCompletionResult(terminalIsError ? null : terminalEvent);
+          setErrorResult(terminalIsError ? terminalEvent : null);
+        }
+
+        // Stop polling on terminal state
+        if (task.status === 'completed' || task.status === 'failed') {
+          if (pollRef.current) {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+          }
+          if (task.status === 'completed') {
+            onCompletedRef.current?.(task.result_summary);
+          }
+        }
+      } catch {
+        // silent — keep polling
+      }
+    };
+
+    // Initial fetch
+    poll();
+
+    pollRef.current = setInterval(poll, 2000);
+    return () => {
+      cancelled = true;
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }, [open, taskId]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -336,7 +495,7 @@ const ProcessAnalysisDialog: React.FC<ProcessAnalysisDialogProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <ThunderboltOutlined style={{ color: '#3f6f8f' }} />
           <span style={{ fontWeight: 600 }}>LLM 文档分析</span>
-          {isStreaming && (
+          {(isStreaming || taskId) && (
             <Tag color="#3f6f8f" style={{ border: 'none', fontSize: 11, marginLeft: 'auto' }}>
               <LoadingOutlined style={{ marginRight: 4 }} />
               分析中
@@ -380,10 +539,14 @@ const ProcessAnalysisDialog: React.FC<ProcessAnalysisDialogProps> = ({
               {step.status === 'done' && step.result && (
                 <RenderStepResult step={step.key} data={step.result} onViewConverted={() => setConvertedViewerOpen(true)} />
               )}
+              {/* Embed & refine steps: show progress bar even during thinking */}
+              {step.status === 'thinking' && (step.key === 'embed' || step.key === 'refine') && step.result && (
+                <RenderStepResult step={step.key} data={step.result} onViewConverted={() => setConvertedViewerOpen(true)} />
+              )}
               {step.status === 'error' && step.result && (
                 <RenderStepResult step="error" data={step.result} />
               )}
-              {step.status === 'thinking' && step.result && !step.thinkingTokens && (
+              {step.status === 'thinking' && step.result && step.key !== 'embed' && step.key !== 'refine' && !step.thinkingTokens && (
                 <div className="process-result">
                   {step.result.message && (
                     <div className="process-result-message">{step.result.message}</div>
@@ -401,7 +564,49 @@ const ProcessAnalysisDialog: React.FC<ProcessAnalysisDialogProps> = ({
           );
         })}
 
-        {isStreaming && (
+        {/* Completion banner */}
+        {completionResult && (
+          <div style={{
+            marginTop: 16, padding: '14px 16px',
+            background: 'linear-gradient(135deg, #f0f7f0, #f8fafc)',
+            border: '1px solid #b3d4b3',
+            borderRadius: 10,
+            display: 'flex', alignItems: 'center', gap: 10,
+          }}>
+            <CheckCircleOutlined style={{ color: '#547b63', fontSize: 18 }} />
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 14, color: '#202a34' }}>
+                处理完成
+              </div>
+              <div style={{ fontSize: 12, color: '#667482', marginTop: 2 }}>
+                共 {completionResult.data?.chunk_count} 个分块（{completionResult.data?.strategy_label}）
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Error banner */}
+        {errorResult && (
+          <div style={{
+            marginTop: 16, padding: '14px 16px',
+            background: '#fef2f2',
+            border: '1px solid #fecaca',
+            borderRadius: 10,
+            display: 'flex', alignItems: 'center', gap: 10,
+          }}>
+            <CloseCircleOutlined style={{ color: '#e74c3c', fontSize: 18 }} />
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 14, color: '#e74c3c' }}>
+                处理失败
+              </div>
+              <div style={{ fontSize: 12, color: '#667482', marginTop: 2 }}>
+                {errorResult.data?.message || '未知错误'}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {(isStreaming || taskId) && !completionResult && !errorResult && (
           <div className="process-streaming-indicator">
             <span className="process-cursor" />
           </div>

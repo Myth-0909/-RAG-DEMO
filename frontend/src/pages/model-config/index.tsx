@@ -315,7 +315,7 @@ const ModelConfigPage: React.FC = () => {
         onOk={() => form.submit()}
         okText={editingConfig ? '保存' : '创建'}
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
         width={520}
       >
         <Form form={form} onFinish={handleSubmit} layout="vertical" style={{ marginTop: 20 }}>
